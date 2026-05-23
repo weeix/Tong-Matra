@@ -211,7 +211,7 @@ export default function StatuteForm({ onSync, isSyncing, syncProgress }: Statute
             <button
               id="submit-sync-btn"
               type="submit"
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 px-4 rounded-xl font-bold text-xs uppercase tracking-wider transition-all shadow-md shadow-indigo-650/10 hover:shadow-lg active:scale-[0.99] flex items-center justify-center space-x-2 cursor-pointer"
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 px-4 rounded-xl font-bold text-xs uppercase tracking-wider transition-all shadow-md shadow-indigo-600/10 hover:shadow-lg active:scale-[0.99] flex items-center justify-center space-x-2 cursor-pointer"
             >
               <span>บันทึกตารางท่องจำนี้ลง Google Calendar</span>
             </button>

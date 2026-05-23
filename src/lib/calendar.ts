@@ -378,7 +378,7 @@ export async function deleteSRSSchedule(
 
       const updateUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events/${event.id}`;
       await authorizedFetch(updateUrl, token, {
-        method: 'PUT',
+        method: 'PATCH',
         body: JSON.stringify(updateBody),
       });
     }

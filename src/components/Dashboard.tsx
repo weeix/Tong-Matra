@@ -188,7 +188,7 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
             <button
               id="center-add-plan-btn"
               onClick={onNavigateToAddPlan}
-              className="mt-6 inline-flex items-center space-x-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-indigo-650/10 cursor-pointer active:scale-[0.98]"
+              className="mt-6 inline-flex items-center space-x-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-indigo-600/10 cursor-pointer active:scale-[0.98]"
             >
               <span>เพิ่มแผนท่องจำมาตรา</span>
             </button>
@@ -357,7 +357,7 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
       {sessionToDelete && (
         <div id="cascade-delete-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
           <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex items-center space-x-3 text-red-650 mb-4 border-b border-slate-100 pb-3">
+            <div className="flex items-center space-x-3 text-red-600 mb-4 border-b border-slate-100 pb-3">
               <div className="p-2.5 bg-red-50 border border-red-100 rounded-full">
                 <ShieldAlert size={22} className="text-red-600" />
               </div>
@@ -413,7 +413,7 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
                 <button
                   id="confirm-delete-btn"
                   onClick={handleDeleteConfirm}
-                  className="flex-1 bg-red-650 hover:bg-red-700 text-white font-bold py-2 rounded-xl text-xs transition-all shadow-md shadow-red-650/10 cursor-pointer text-center"
+                  className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded-xl text-xs transition-all shadow-md shadow-red-600/10 cursor-pointer text-center"
                 >
                   ถอนกำหนดการและลบปฏิทิน
                 </button>

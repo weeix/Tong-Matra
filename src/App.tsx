@@ -193,7 +193,7 @@ export default function App() {
               <div className="absolute top-0 left-0 w-full h-1.5 bg-indigo-600" />
               
               <div className="max-w-md mx-auto space-y-6">
-                <div className="inline-flex p-4 bg-indigo-50 border border-indigo-100/50 rounded-full text-indigo-650 mb-2 shadow-inner">
+                <div className="inline-flex p-4 bg-indigo-50 border border-indigo-100/50 rounded-full text-indigo-600 mb-2 shadow-inner">
                   <BookmarkIcon className="w-12 h-12 text-indigo-600" />
                 </div>
 

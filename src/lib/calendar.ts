@@ -368,11 +368,21 @@ export async function deleteSRSSchedule(
         }
       }
 
+      // Any key in the original event's private property that is NOT in cleanProps
+      // must be explicitly set to null to delete it via PATCH merge
+      const patchProps: Record<string, string | null> = { ...cleanProps };
+      const originalPrivate = event.extendedProperties?.private || {};
+      for (const k of Object.keys(originalPrivate)) {
+        if (!(k in cleanProps)) {
+          patchProps[k] = null;
+        }
+      }
+
       const updateBody = {
         summary,
         description,
         extendedProperties: {
-          private: cleanProps,
+          private: patchProps,
         },
       };
 

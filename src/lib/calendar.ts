@@ -1,36 +1,272 @@
 import { GoogleCalendarEvent, LawCategory, LAW_CATEGORIES } from '../types';
 
 /**
- * Perform a general fetch call with OAuth token
+ * Interface representing options to initialize the GoogleCalendarService
  */
-async function authorizedFetch(url: string, token: string, options: RequestInit = {}) {
-  const headers = {
-    ...options.headers,
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json',
-  };
+export interface CalendarServiceOptions {
+  token: string;
+  fetchFn?: typeof fetch;
+}
 
-  const response = await fetch(url, { ...options, headers });
-  
-  if (!response.ok) {
-    const text = await response.text();
-    let errorMsg = `Google Calendar API error (${response.status})`;
-    try {
-      const parsed = JSON.parse(text);
-      if (parsed.error?.message) {
-        errorMsg += `: ${parsed.error.message}`;
+/**
+ * GoogleCalendarService encapsulates all API transactions and operations
+ * while supporting constructor-based Dependency Injection for HTTP requests.
+ */
+export class GoogleCalendarService {
+  private token: string;
+  private fetchFn: typeof fetch;
+
+  constructor(options: CalendarServiceOptions) {
+    this.token = options.token;
+    // Fallback to standard context-bound global fetch if not explicitly injected
+    this.fetchFn = options.fetchFn || (typeof window !== 'undefined' ? window.fetch.bind(window) : (globalThis.fetch || fetch));
+  }
+
+  /**
+   * Perform an authorized fetch call with OAuth token injected in headers
+   */
+  async authorizedFetch<T = any>(url: string, options: RequestInit = {}): Promise<T> {
+    const headers = {
+      ...options.headers,
+      'Authorization': `Bearer ${this.token}`,
+      'Content-Type': 'application/json',
+    };
+
+    const response = await this.fetchFn(url, { ...options, headers });
+    
+    if (!response.ok) {
+      const text = await response.text();
+      let errorMsg = `Google Calendar API error (${response.status})`;
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed.error?.message) {
+          errorMsg += `: ${parsed.error.message}`;
+        }
+      } catch {
+        errorMsg += `: ${text}`;
       }
-    } catch {
-      errorMsg += `: ${text}`;
+      throw new Error(errorMsg);
     }
-    throw new Error(errorMsg);
+
+    if (response.status === 204) {
+      return null as any;
+    }
+
+    return response.json();
   }
 
-  if (response.status === 204) {
-    return null;
+  /**
+   * Fetches all events containing the App Metadata
+   */
+  async fetchAppEvents(): Promise<GoogleCalendarEvent[]> {
+    // Query starting 60 days in the past
+    const timeMin = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
+    // Request all active app events using our unique appId filter
+    const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?privateExtendedProperty=appId=law-srs-app-v1&singleEvents=true&timeMin=${encodeURIComponent(timeMin)}&maxResults=2500`;
+    
+    const result = await this.authorizedFetch(url);
+    return result.items || [];
   }
 
-  return response.json();
+  /**
+   * Create or upgrade schedules for Day 0, Day +2, Day +5, Day +30
+   */
+  async syncSRSSchedule(
+    category: LawCategory,
+    sections: string,
+    startDate: Date,
+    onProgress?: (step: string) => void
+  ): Promise<string> {
+    const groupId = generateUUID();
+    const offsets = [0, 2, 5, 30];
+    const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+    for (let i = 0; i < offsets.length; i++) {
+      const offset = offsets[i];
+      const targetDate = new Date(startDate);
+      targetDate.setDate(targetDate.getDate() + offset);
+      
+      const dateStr = formatDateISO(targetDate);
+      onProgress?.(`กำลังบันทึกวันทบทวนรอบ Day +${offset} (${dateStr})...`);
+
+      // Boundaries of that day
+      const timeMin = `${dateStr}T00:00:00Z`;
+      const timeMax = `${dateStr}T23:59:59Z`;
+
+      // Query overlapping events
+      const queryUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events?privateExtendedProperty=appId=law-srs-app-v1&timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}&singleEvents=true`;
+      const queryResult = await this.authorizedFetch(queryUrl);
+      const existingEvents: GoogleCalendarEvent[] = queryResult.items || [];
+
+      if (existingEvents.length > 0) {
+        // Scenario B: Overlapping Event Exists -> Update matching event
+        const event = existingEvents[0];
+        const privateProps = { ...(event.extendedProperties?.private || {}) } as Record<string, string>;
+
+        // Track session and add identifiers
+        privateProps[`g_${groupId}`] = 'true';
+        privateProps[`sess_${groupId}`] = `${category}:${sections}`;
+
+        // Refresh sec_* based on instructions
+        const keySuffix = `sec_${category}`;
+        const previousValue = privateProps[keySuffix];
+        if (previousValue) {
+          privateProps[keySuffix] = `${previousValue}, ${sections}`;
+        } else {
+          privateProps[keySuffix] = sections;
+        }
+
+        // Refresh summary & description based on updated values
+        const { summary, description } = generateEventDetails(privateProps);
+
+        const updateBody = {
+          summary,
+          description,
+          extendedProperties: {
+            private: privateProps,
+          },
+        };
+
+        const updateUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events/${event.id}`;
+        await this.authorizedFetch(updateUrl, {
+          method: 'PATCH',
+          body: JSON.stringify(updateBody),
+        });
+      } else {
+        // Scenario A: No Overlapping Event -> Create a new Event
+        const startISO = `${dateStr}T09:00:00`;
+        const endISO = `${dateStr}T10:00:00`;
+
+        const privateProps: Record<string, string> = {
+          appId: 'law-srs-app-v1',
+          [`g_${groupId}`]: 'true',
+          [`sess_${groupId}`]: `${category}:${sections}`,
+          [`sec_${category}`]: sections,
+        };
+
+        const { summary, description } = generateEventDetails(privateProps);
+
+        const createBody = {
+          summary,
+          description,
+          start: {
+            dateTime: startISO,
+            timeZone: localTimeZone,
+          },
+          end: {
+            dateTime: endISO,
+            timeZone: localTimeZone,
+          },
+          extendedProperties: {
+            private: privateProps,
+          },
+        };
+
+        const createUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events`;
+        await this.authorizedFetch(createUrl, {
+          method: 'POST',
+          body: JSON.stringify(createBody),
+        });
+      }
+    }
+
+    return groupId;
+  }
+
+  /**
+   * Execute Cascade Delete Workflow
+   */
+  async deleteSRSSchedule(
+    groupId: string,
+    category: LawCategory,
+    onProgress?: (msg: string) => void
+  ): Promise<void> {
+    onProgress?.('กำลังค้นหากิจกรรมบนปฏิทิน...');
+    
+    // Find all events sharing this groupId
+    const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?privateExtendedProperty=g_${groupId}=true&singleEvents=true`;
+    const result = await this.authorizedFetch(url);
+    const matchedEvents: GoogleCalendarEvent[] = result.items || [];
+
+    if (matchedEvents.length === 0) {
+      onProgress?.('ไม่พบกิจกรรมทบทวนที่ตรงกันในปฏิทินของคุณ');
+      return;
+    }
+
+    onProgress?.(`พบ ${matchedEvents.length} วันกิจกรรม. กำลังดำเนินการลบแบบตามลำดับ (Cascade)...`);
+
+    for (let idx = 0; idx < matchedEvents.length; idx++) {
+      const event = matchedEvents[idx];
+      const privateProps = { ...(event.extendedProperties?.private || {}) } as Record<string, string>;
+
+      // Count how many total active sessions are in this day event
+      const activeSessions = Object.keys(privateProps).filter(k => k.startsWith('sess_'));
+
+      if (activeSessions.length <= 1) {
+        // It contains *only* the sections tied to this specific session! Delete the entire event.
+        onProgress?.(`กำลังลบกิจกรรมในปฏิทินวันที่ ${event.start?.dateTime?.split('T')[0] || event.start?.date}...`);
+        const deleteUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events/${event.id}`;
+        await this.authorizedFetch(deleteUrl, { method: 'DELETE' });
+      } else {
+        // The event contains other overlapping sessions! Remove only this series key/reference.
+        onProgress?.(`กำลังปรับปรุงข้อมูลซ้ำซ้อนวันที่ ${event.start?.dateTime?.split('T')[0] || event.start?.date}...`);
+        
+        // Delete the specific tracking elements
+        delete privateProps[`g_${groupId}`];
+        delete privateProps[`sess_${groupId}`];
+
+        // Recalculate sec_* keys using surviving sessions
+        const cleanProps: Record<string, string> = {
+          appId: 'law-srs-app-v1',
+        };
+
+        // Recopy other groups
+        for (const k of Object.keys(privateProps)) {
+          if (k.startsWith('g_') || k.startsWith('sess_')) {
+            cleanProps[k] = privateProps[k];
+          }
+        }
+
+        // Re-populate clean sec_* properties from surviving sessions
+        const { summary, description, sectionsByCat } = generateEventDetails(cleanProps);
+
+        // Populate sec_ keys properly
+        for (const catKey of Object.keys(LAW_CATEGORIES)) {
+          const cat = catKey as LawCategory;
+          const items = sectionsByCat[cat];
+          if (items && items.length > 0) {
+            cleanProps[`sec_${cat}`] = items.join(', ');
+          }
+        }
+
+        // Any key in the original event's private property that is NOT in cleanProps
+        // must be explicitly set to null to delete it via PATCH merge
+        const patchProps: Record<string, string | null> = { ...cleanProps };
+        const originalPrivate = event.extendedProperties?.private || {};
+        for (const k of Object.keys(originalPrivate)) {
+          if (!(k in cleanProps)) {
+            patchProps[k] = null;
+          }
+        }
+
+        const updateBody = {
+          summary,
+          description,
+          extendedProperties: {
+            private: patchProps,
+          },
+        };
+
+        const updateUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events/${event.id}`;
+        await this.authorizedFetch(updateUrl, {
+          method: 'PATCH',
+          body: JSON.stringify(updateBody),
+        });
+      }
+    }
+
+    onProgress?.('ลบแผนการเรียนรู้และปรับปรุงกิจกรรมสำเร็จเรียบร้อย!');
+  }
 }
 
 /**
@@ -64,19 +300,6 @@ export interface LawSessionDetail {
   sections: string;
   dates: string[]; // YYYY-MM-DD values
   createdDate: string; // The Day 0 date
-}
-
-/**
- * Fetches all events containing the App Metadata
- */
-export async function fetchAppEvents(token: string): Promise<GoogleCalendarEvent[]> {
-  // Query starting 60 days in the past
-  const timeMin = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
-  // Request all active app events using our unique appId filter
-  const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?privateExtendedProperty=appId=law-srs-app-v1&singleEvents=true&timeMin=${encodeURIComponent(timeMin)}&maxResults=2500`;
-  
-  const result = await authorizedFetch(url, token);
-  return result.items || [];
 }
 
 /**
@@ -194,8 +417,14 @@ export function generateEventDetails(privateProperties: Record<string, string>) 
 }
 
 /**
- * Create or upgrade schedules for Day 0, Day +2, Day +5, Day +30
+ * ADAPTER WRAAPERS (Maintaining functional backward-compatibility)
  */
+
+export async function fetchAppEvents(token: string): Promise<GoogleCalendarEvent[]> {
+  const service = new GoogleCalendarService({ token });
+  return service.fetchAppEvents();
+}
+
 export async function syncSRSSchedule(
   token: string,
   category: LawCategory,
@@ -203,196 +432,17 @@ export async function syncSRSSchedule(
   startDate: Date,
   onProgress?: (step: string) => void
 ): Promise<string> {
-  const groupId = generateUUID();
-  const offsets = [0, 2, 5, 30];
-  const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-
-  for (let i = 0; i < offsets.length; i++) {
-    const offset = offsets[i];
-    const targetDate = new Date(startDate);
-    targetDate.setDate(targetDate.getDate() + offset);
-    
-    const dateStr = formatDateISO(targetDate);
-    onProgress?.(`กำลังบันทึกวันทบทวนรอบ Day +${offset} (${dateStr})...`);
-
-    // Boundaries of that day
-    const timeMin = `${dateStr}T00:00:00Z`;
-    const timeMax = `${dateStr}T23:59:59Z`;
-
-    // Query overlapping events
-    const queryUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events?privateExtendedProperty=appId=law-srs-app-v1&timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}&singleEvents=true`;
-    const queryResult = await authorizedFetch(queryUrl, token);
-    const existingEvents: GoogleCalendarEvent[] = queryResult.items || [];
-
-    if (existingEvents.length > 0) {
-      // Scenario B: Overlapping Event Exists -> Update matching event
-      const event = existingEvents[0];
-      const privateProps = { ...(event.extendedProperties?.private || {}) } as Record<string, string>;
-
-      // Track session and add identifiers
-      privateProps[`g_${groupId}`] = 'true';
-      privateProps[`sess_${groupId}`] = `${category}:${sections}`;
-
-      // Refresh sec_* based on instructions:
-      // "Check if the key sec_[law_suffix] already exists in that event's private property.
-      // If it exists: Append the new sections, comma-separated. Otherwise set it."
-      const keySuffix = `sec_${category}`;
-      const previousValue = privateProps[keySuffix];
-      if (previousValue) {
-        privateProps[keySuffix] = `${previousValue}, ${sections}`;
-      } else {
-        privateProps[keySuffix] = sections;
-      }
-
-      // Refresh summary & description based on updated values
-      const { summary, description } = generateEventDetails(privateProps);
-
-      const updateBody = {
-        summary,
-        description,
-        extendedProperties: {
-          private: privateProps,
-        },
-      };
-
-      const updateUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events/${event.id}`;
-      await authorizedFetch(updateUrl, token, {
-        method: 'PATCH',
-        body: JSON.stringify(updateBody),
-      });
-    } else {
-      // Scenario A: No Overlapping Event -> Create a new Event
-      const startISO = `${dateStr}T09:00:00`;
-      const endISO = `${dateStr}T10:00:00`;
-
-      const privateProps: Record<string, string> = {
-        appId: 'law-srs-app-v1',
-        [`g_${groupId}`]: 'true',
-        [`sess_${groupId}`]: `${category}:${sections}`,
-        [`sec_${category}`]: sections,
-      };
-
-      const { summary, description } = generateEventDetails(privateProps);
-
-      const createBody = {
-        summary,
-        description,
-        start: {
-          dateTime: startISO,
-          timeZone: localTimeZone,
-        },
-        end: {
-          dateTime: endISO,
-          timeZone: localTimeZone,
-        },
-        extendedProperties: {
-          private: privateProps,
-        },
-      };
-
-      const createUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events`;
-      await authorizedFetch(createUrl, token, {
-        method: 'POST',
-        body: JSON.stringify(createBody),
-      });
-    }
-  }
-
-  return groupId;
+  const service = new GoogleCalendarService({ token });
+  return service.syncSRSSchedule(category, sections, startDate, onProgress);
 }
 
-/**
- * Execute Cascade Delete Workflow
- */
 export async function deleteSRSSchedule(
   token: string,
   groupId: string,
   category: LawCategory,
   onProgress?: (msg: string) => void
 ): Promise<void> {
-  onProgress?.('กำลังค้นหากิจกรรมบนปฏิทิน...');
-  
-  // Find all events sharing this groupId
-  const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?privateExtendedProperty=g_${groupId}=true&singleEvents=true`;
-  const result = await authorizedFetch(url, token);
-  const matchedEvents: GoogleCalendarEvent[] = result.items || [];
-
-  if (matchedEvents.length === 0) {
-    onProgress?.('ไม่พบกิจกรรมทบทวนที่ตรงกันในปฏิทินของคุณ');
-    return;
-  }
-
-  onProgress?.(`พบ ${matchedEvents.length} วันกิจกรรม. กำลังดำเนินการลบแบบตามลำดับ (Cascade)...`);
-
-  for (let idx = 0; idx < matchedEvents.length; idx++) {
-    const event = matchedEvents[idx];
-    const privateProps = { ...(event.extendedProperties?.private || {}) } as Record<string, string>;
-
-    // Count how many total active sessions are in this day event
-    const activeSessions = Object.keys(privateProps).filter(k => k.startsWith('sess_'));
-
-    if (activeSessions.length <= 1) {
-      // It contains *only* the sections tied to this specific session! Delete the entire event.
-      onProgress?.(`กำลังลบกิจกรรมในปฏิทินวันที่ ${event.start?.dateTime?.split('T')[0] || event.start?.date}...`);
-      const deleteUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events/${event.id}`;
-      await authorizedFetch(deleteUrl, token, { method: 'DELETE' });
-    } else {
-      // The event contains other overlapping sessions! Remove only this series key/reference.
-      onProgress?.(`กำลังปรับปรุงข้อมูลซ้ำซ้อนวันที่ ${event.start?.dateTime?.split('T')[0] || event.start?.date}...`);
-      
-      // Delete the specific tracking elements
-      delete privateProps[`g_${groupId}`];
-      delete privateProps[`sess_${groupId}`];
-
-      // Recalculate sec_* keys using surviving sessions
-      const cleanProps: Record<string, string> = {
-        appId: 'law-srs-app-v1',
-      };
-
-      // Recopy other groups
-      for (const k of Object.keys(privateProps)) {
-        if (k.startsWith('g_') || k.startsWith('sess_')) {
-          cleanProps[k] = privateProps[k];
-        }
-      }
-
-      // Re-populate clean sec_* properties from surviving sessions
-      const { summary, description, sectionsByCat } = generateEventDetails(cleanProps);
-
-      // Populate sec_ keys properly
-      for (const catKey of Object.keys(LAW_CATEGORIES)) {
-        const cat = catKey as LawCategory;
-        const items = sectionsByCat[cat];
-        if (items && items.length > 0) {
-          cleanProps[`sec_${cat}`] = items.join(', ');
-        }
-      }
-
-      // Any key in the original event's private property that is NOT in cleanProps
-      // must be explicitly set to null to delete it via PATCH merge
-      const patchProps: Record<string, string | null> = { ...cleanProps };
-      const originalPrivate = event.extendedProperties?.private || {};
-      for (const k of Object.keys(originalPrivate)) {
-        if (!(k in cleanProps)) {
-          patchProps[k] = null;
-        }
-      }
-
-      const updateBody = {
-        summary,
-        description,
-        extendedProperties: {
-          private: patchProps,
-        },
-      };
-
-      const updateUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events/${event.id}`;
-      await authorizedFetch(updateUrl, token, {
-        method: 'PATCH',
-        body: JSON.stringify(updateBody),
-      });
-    }
-  }
-
-  onProgress?.('ลบแผนการเรียนรู้และปรับปรุงกิจกรรมสำเร็จเรียบร้อย!');
+  const service = new GoogleCalendarService({ token });
+  return service.deleteSRSSchedule(groupId, category, onProgress);
 }
+

@@ -3,7 +3,8 @@ import {
   generateUUID, 
   formatDateISO, 
   parseStudySessions, 
-  generateEventDetails 
+  generateEventDetails,
+  GoogleCalendarService
 } from './calendar';
 import { GoogleCalendarEvent } from '../types';
 
@@ -140,4 +141,76 @@ describe('Calendar Utils', () => {
       expect(sessions[0].createdDate).toBe('2026-06-01');
     });
   });
+
+  describe('GoogleCalendarService DI integration', () => {
+    it('successfully calls authorizedFetch and sets authentication headers', async () => {
+      let capturedRequestUrl = '';
+      let capturedHeaders: Record<string, string> = {};
+
+      const mockFetch: typeof fetch = async (url, options) => {
+        capturedRequestUrl = url.toString();
+        capturedHeaders = (options?.headers || {}) as Record<string, string>;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ items: [] }),
+        } as unknown as Response;
+      };
+
+      const service = new GoogleCalendarService({
+        token: 'test_token_123',
+        fetchFn: mockFetch,
+      });
+
+      const events = await service.fetchAppEvents();
+      expect(events).toEqual([]);
+      expect(capturedRequestUrl).toContain('googleapis.com/calendar/v3/calendars/primary/events');
+      expect(capturedHeaders['Authorization']).toBe('Bearer test_token_123');
+      expect(capturedHeaders['Content-Type']).toBe('application/json');
+    });
+
+    it('handles API errors correctly in authorizedFetch', async () => {
+      const mockFetch: typeof fetch = async () => {
+        return {
+          ok: false,
+          status: 403,
+          text: async () => JSON.stringify({ error: { message: 'Insufficient Permission' } }),
+        } as unknown as Response;
+      };
+
+      const service = new GoogleCalendarService({
+        token: 'test_token_error',
+        fetchFn: mockFetch,
+      });
+
+      await expect(service.fetchAppEvents()).rejects.toThrow('Google Calendar API error (403): Insufficient Permission');
+    });
+
+    it('injects status message updates during syncSRSSchedule', async () => {
+      const recordedSteps: string[] = [];
+      const mockFetch: typeof fetch = async () => {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ items: [] }),
+        } as unknown as Response;
+      };
+
+      const service = new GoogleCalendarService({
+        token: 'dummy',
+        fetchFn: mockFetch,
+      });
+
+      await service.syncSRSSchedule('crim', '288', new Date(2026, 4, 1), (step) => {
+        recordedSteps.push(step);
+      });
+
+      expect(recordedSteps).toHaveLength(4);
+      expect(recordedSteps[0]).toContain('Day +0');
+      expect(recordedSteps[1]).toContain('Day +2');
+      expect(recordedSteps[2]).toContain('Day +5');
+      expect(recordedSteps[3]).toContain('Day +30');
+    });
+  });
 });
+

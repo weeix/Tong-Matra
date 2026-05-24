@@ -10,7 +10,7 @@ const provider = new GoogleAuthProvider();
 provider.addScope('https://www.googleapis.com/auth/calendar.events');
 
 let isSigningIn = false;
-let cachedAccessToken: string | null = null;
+let cachedAccessToken: string | null = typeof window !== 'undefined' ? sessionStorage.getItem('google_calendar_token') : null;
 
 // Listen for auth state changes & handle in-memory cache token
 export const initAuth = (
@@ -24,10 +24,12 @@ export const initAuth = (
       } else if (!isSigningIn) {
         // Clear token since we don't have it cached
         cachedAccessToken = null;
+        sessionStorage.removeItem('google_calendar_token');
         if (onAuthFailure) onAuthFailure();
       }
     } else {
       cachedAccessToken = null;
+      sessionStorage.removeItem('google_calendar_token');
       if (onAuthFailure) onAuthFailure();
     }
   });
@@ -45,6 +47,7 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     }
 
     cachedAccessToken = credential.accessToken;
+    sessionStorage.setItem('google_calendar_token', cachedAccessToken);
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error) {
     console.error('Sign-in Error:', error);
@@ -62,10 +65,16 @@ export const getAccessToken = (): string | null => {
 // Set token directly (e.g. immediately after login)
 export const setCachedAccessToken = (token: string | null) => {
   cachedAccessToken = token;
+  if (token) {
+    sessionStorage.setItem('google_calendar_token', token);
+  } else {
+    sessionStorage.removeItem('google_calendar_token');
+  }
 };
 
 // Sign out and clear in-memory caches
 export const logout = async () => {
   await signOut(auth);
   cachedAccessToken = null;
+  sessionStorage.removeItem('google_calendar_token');
 };

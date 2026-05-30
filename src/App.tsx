@@ -159,7 +159,7 @@ export default function App() {
               </div>
               <div>
                 <h1 className="font-sans text-lg font-extrabold text-slate-900 tracking-tight leading-none">
-                  ท่องมาตรา (Tong Matra)
+                  Tong Matra
                 </h1>
                 <p className="text-[10px] font-mono uppercase tracking-widest text-indigo-600 font-semibold mt-1">
                   ระบบวางแผนท่องจำและทบทวนอย่างมีประสิทธิภาพ
@@ -219,7 +219,7 @@ export default function App() {
 
                       <div className="space-y-2">
                         <h2 className="font-sans text-2xl sm:text-3xl font-black tracking-tight text-slate-900">
-                          ท่องมาตรา (Tong Matra)
+                          Tong Matra (ท่องมาตรา)
                         </h2>
                         <p className="text-sm text-slate-500 leading-relaxed">
                           ระบบสร้างตารางทบทวนและจดจำมาตรากฎหมายแบบเว้นระยะห่าง (Spaced Repetition) ออกแบบขึ้นเฉพาะสำหรับผู้ศึกษากฎหมายไทย เพื่อช่วยเพิ่มศักยภาพของการจดจำวิชาประมวลกฎหมายได้อย่างแม่นยำถาวรผ่าน Google Calendar ของคุณเอง
@@ -534,7 +534,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center sm:text-left flex flex-col sm:flex-row items-center justify-between text-slate-400 text-[10px] font-mono leading-relaxed space-y-4 sm:space-y-0">
           <div className="space-y-1.5">
             <div>
-              ท่องมาตรา (TONG MATRA) • โปรแกรมวางแผนทบทวนแบบเว้นระยะห่างสำหรับผู้ศึกษากฎหมายไทย
+              Tong Matra (ท่องมาตรา) • โปรแกรมวางแผนทบทวนแบบเว้นระยะห่างสำหรับผู้ศึกษากฎหมายไทย
             </div>
             <div className="flex justify-center sm:justify-start items-center space-x-3 text-slate-500 font-semibold text-[10px]">
               <button

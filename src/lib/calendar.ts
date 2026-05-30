@@ -411,7 +411,7 @@ export function generateEventDetails(privateProperties: Record<string, string>) 
     ? `[ทบทวนกฎหมาย] ${summaryParts.join(' | ')}`
     : `[ทบทวนกฎหมาย]`;
 
-  const description = `📅 ตารางทบทวนกฎหมาย (ระบบความจำระยะยาว Spaced Repetition)\n\nกรุณาทบทวนประมวลกฎหมายตามมาตราต่อไปนี้ในวันนี้:\n${listItems.join('\n')}\n\nจัดทำตารางโดยแอป "ท่องมาตรา" (Tong Matra)`;
+  const description = `📅 ตารางทบทวนกฎหมาย (ระบบความจำระยะยาว Spaced Repetition)\n\nกรุณาทบทวนประมวลกฎหมายตามมาตราต่อไปนี้ในวันนี้:\n${listItems.join('\n')}\n\nจัดทำตารางโดยแอป "Tong Matra (ท่องมาตรา)"`;
 
   return { summary, description, sectionsByCat };
 }

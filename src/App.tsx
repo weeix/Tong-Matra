@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import { CustomUser, getStoredAuth, setStoredAuth, requestGoogleSignIn } from './lib/auth';
+import { CustomUser, getStoredAuth, setStoredAuth, requestGoogleSignIn, checkAuthCallback, getGoogleClientId } from './lib/auth';
 import { fetchAppEvents, parseStudySessions, syncSRSSchedule, LawSessionDetail } from './lib/calendar';
 import { GoogleCalendarEvent, LawCategory } from './types';
 import StatuteForm from './components/StatuteForm';
@@ -26,18 +26,42 @@ export default function App() {
 
   // Listen to Auth State on mount
   useEffect(() => {
-    const { user: storedUser, token: storedToken } = getStoredAuth();
-    if (storedUser && storedToken) {
-      setUser(storedUser);
-      setToken(storedToken);
-      setNeedsAuth(false);
-      loadCalendarMetadata(storedToken);
-    } else {
-      setUser(null);
-      setToken(null);
-      setNeedsAuth(true);
-    }
-    setIsInitializing(false);
+    const handleInit = async () => {
+      // 1. Check if we are landing back from Google OAuth redirect (URL hash check)
+      const handled = await checkAuthCallback(
+        (loggedInUser, accessToken) => {
+          setUser(loggedInUser);
+          setToken(accessToken);
+          setNeedsAuth(false);
+          loadCalendarMetadata(accessToken);
+          navigate('/', { replace: true });
+        },
+        (errorMsg) => {
+          setAuthError(errorMsg);
+        }
+      );
+
+      if (handled) {
+        setIsInitializing(false);
+        return;
+      }
+
+      // 2. Otherwise regular stored flow check
+      const { user: storedUser, token: storedToken } = getStoredAuth();
+      if (storedUser && storedToken) {
+        setUser(storedUser);
+        setToken(storedToken);
+        setNeedsAuth(false);
+        loadCalendarMetadata(storedToken);
+      } else {
+        setUser(null);
+        setToken(null);
+        setNeedsAuth(true);
+      }
+      setIsInitializing(false);
+    };
+
+    handleInit();
   }, []);
 
   const handleLogin = async () => {
@@ -230,11 +254,11 @@ export default function App() {
                       )}
 
                       {/* Google Sign-In with official guidelines formatting */}
-                      <div className="pt-2">
+                      <div className="pt-2 space-y-3">
                         <button
                           id="gsi-login-btn"
                           onClick={handleLogin}
-                          disabled={isLoggingIn}
+                          disabled={isLoggingIn || !getGoogleClientId()}
                           className="gsi-material-button w-full sm:w-auto shadow-sm"
                         >
                           <div className="gsi-material-button-state"></div>
@@ -252,6 +276,12 @@ export default function App() {
                             <span style={{ display: "none" }}>Sign in with Google</span>
                           </div>
                         </button>
+
+                        {!getGoogleClientId() && (
+                          <div className="text-[11px] text-red-500 font-medium font-mono leading-relaxed max-w-sm mx-auto bg-red-50/50 border border-red-100 p-3 rounded-xl">
+                            ⚠ ยังไม่ได้กำหนด Google Client ID ในระบบสร้าง (VITE_GOOGLE_CLIENT_ID) กรุณาระบุกุญแจเชื่อมต่อตอนดีพลอยแอปพลิเคชัน
+                          </div>
+                        )}
                       </div>
 
                       <div className="text-[10px] text-slate-400 font-mono">

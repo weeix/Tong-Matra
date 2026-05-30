@@ -5,6 +5,8 @@ import { fetchAppEvents, parseStudySessions, syncSRSSchedule, LawSessionDetail }
 import { GoogleCalendarEvent, LawCategory } from './types';
 import StatuteForm from './components/StatuteForm';
 import Dashboard from './components/Dashboard';
+import PrivacyPolicy from './components/PrivacyPolicy';
+import TermsOfService from './components/TermsOfService';
 import { Calendar, BookOpen, LogOut, CheckCircle, RefreshCw, AlertCircle, Sparkles, LogIn } from 'lucide-react';
 
 export default function App() {
@@ -404,6 +406,10 @@ export default function App() {
             }
           />
 
+          {/* Privacy Policy and Terms of Service (Public Routes) */}
+          <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+          <Route path="/terms-of-service" element={<TermsOfService />} />
+
           {/* Catch-all Fallback */}
           <Route path="*" element={<Navigate to={needsAuth ? "/login" : "/"} replace />} />
         </Routes>
@@ -525,11 +531,30 @@ export default function App() {
 
       {/* Footer Area */}
       <footer className="border-t border-slate-200 bg-white py-6 mt-12">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center sm:text-left flex flex-col sm:flex-row items-center justify-between text-slate-400 text-[10px] font-mono leading-relaxed">
-          <div>
-            ท่องมาตรา (TONG MATRA) • โปรแกรมวางแผนทบทวนแบบเว้นระยะห่างสำหรับผู้ศึกษากฎหมายไทย
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center sm:text-left flex flex-col sm:flex-row items-center justify-between text-slate-400 text-[10px] font-mono leading-relaxed space-y-4 sm:space-y-0">
+          <div className="space-y-1.5">
+            <div>
+              ท่องมาตรา (TONG MATRA) • โปรแกรมวางแผนทบทวนแบบเว้นระยะห่างสำหรับผู้ศึกษากฎหมายไทย
+            </div>
+            <div className="flex justify-center sm:justify-start items-center space-x-3 text-slate-500 font-semibold text-[10px]">
+              <button
+                type="button"
+                onClick={() => navigate('/privacy-policy')}
+                className="hover:text-indigo-600 transition-colors underline cursor-pointer"
+              >
+                นโยบายความเป็นส่วนตัว (Privacy Policy)
+              </button>
+              <span>•</span>
+              <button
+                type="button"
+                onClick={() => navigate('/terms-of-service')}
+                className="hover:text-indigo-600 transition-colors underline cursor-pointer"
+              >
+                ข้อตกลงและเงื่อนไข (Terms of Service)
+              </button>
+            </div>
           </div>
-          <div className="mt-2 sm:mt-0 flex items-center space-x-1">
+          <div className="mt-2 sm:mt-0 flex items-center space-x-1 justify-center">
             <span>ขับเคลื่อนโดย</span>
             <span className="text-slate-700 font-bold">Google Calendar</span>
           </div>

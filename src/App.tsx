@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import { User } from 'firebase/auth';
-import { googleSignIn, initAuth, logout, getAccessToken, setCachedAccessToken } from './lib/firebase';
+import { CustomUser, getStoredAuth, setStoredAuth, requestGoogleSignIn } from './lib/auth';
 import { fetchAppEvents, parseStudySessions, syncSRSSchedule, LawSessionDetail } from './lib/calendar';
 import { GoogleCalendarEvent, LawCategory } from './types';
 import StatuteForm from './components/StatuteForm';
@@ -10,7 +9,7 @@ import { Calendar, BookOpen, LogOut, CheckCircle, RefreshCw, AlertCircle, Sparkl
 
 export default function App() {
   const navigate = useNavigate();
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<CustomUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [needsAuth, setNeedsAuth] = useState<boolean>(true);
   const [isInitializing, setIsInitializing] = useState<boolean>(true);
@@ -27,56 +26,45 @@ export default function App() {
 
   // Listen to Auth State on mount
   useEffect(() => {
-    const unsubscribe = initAuth(
-      (currentUser, cachedToken) => {
-        setUser(currentUser);
-        setToken(cachedToken);
-        setNeedsAuth(false);
-        setIsInitializing(false);
-        // Automatically fetch if token is active
-        loadCalendarMetadata(cachedToken);
-      },
-      () => {
-        setUser(null);
-        setToken(null);
-        setNeedsAuth(true);
-        setIsInitializing(false);
-      }
-    );
-
-    return () => unsubscribe();
+    const { user: storedUser, token: storedToken } = getStoredAuth();
+    if (storedUser && storedToken) {
+      setUser(storedUser);
+      setToken(storedToken);
+      setNeedsAuth(false);
+      loadCalendarMetadata(storedToken);
+    } else {
+      setUser(null);
+      setToken(null);
+      setNeedsAuth(true);
+    }
+    setIsInitializing(false);
   }, []);
 
   const handleLogin = async () => {
     setIsLoggingIn(true);
     setAuthError('');
-    try {
-      const result = await googleSignIn();
-      if (result) {
-        setUser(result.user);
-        setToken(result.accessToken);
+    await requestGoogleSignIn(
+      (loggedInUser, accessToken) => {
+        setUser(loggedInUser);
+        setToken(accessToken);
         setNeedsAuth(false);
-        loadCalendarMetadata(result.accessToken);
+        setIsLoggingIn(false);
+        loadCalendarMetadata(accessToken);
+      },
+      (errorMsg) => {
+        setAuthError(errorMsg);
+        setIsLoggingIn(false);
       }
-    } catch (err) {
-      console.error('Login process failed:', err);
-      setAuthError('OAuth authentication or consent was not completed. Please try again.');
-    } finally {
-      setIsLoggingIn(false);
-    }
+    );
   };
 
-  const handleLogout = async () => {
-    try {
-      await logout();
-      setUser(null);
-      setToken(null);
-      setEvents([]);
-      setSessions([]);
-      setNeedsAuth(true);
-    } catch (err) {
-      console.error('Logout error:', err);
-    }
+  const handleLogout = () => {
+    setStoredAuth(null, null);
+    setUser(null);
+    setToken(null);
+    setEvents([]);
+    setSessions([]);
+    setNeedsAuth(true);
   };
 
   // Load user schedules and calendar elements

@@ -1,7 +1,7 @@
-export type LawCategory = 'crim' | 'civ' | 'crimp' | 'civp';
+export type LawCategory = 'crim' | 'civ' | 'crimp' | 'civp' | 'const' | 'court' | 'bankrupt' | 'custom' | string;
 
 export interface LawCategoryConfig {
-  id: LawCategory;
+  id: string;
   name: string;
   color: string;
   bgClass: string;
@@ -9,7 +9,7 @@ export interface LawCategoryConfig {
   textClass: string;
 }
 
-export const LAW_CATEGORIES: Record<LawCategory, LawCategoryConfig> = {
+export const LAW_CATEGORIES: Record<string, LawCategoryConfig> = {
   crim: {
     id: 'crim',
     name: 'ประมวลกฎหมายอาญา',
@@ -42,7 +42,64 @@ export const LAW_CATEGORIES: Record<LawCategory, LawCategoryConfig> = {
     borderClass: 'border-emerald-500',
     textClass: 'text-emerald-600',
   },
+  const: {
+    id: 'const',
+    name: 'รัฐธรรมนูญแห่งราชอาณาจักรไทย',
+    color: '#06b6d4', // Cyan
+    bgClass: 'bg-cyan-50 text-cyan-700 border-cyan-200',
+    borderClass: 'border-cyan-500',
+    textClass: 'text-cyan-600',
+  },
+  court: {
+    id: 'court',
+    name: 'พ.ร.บ.พระธรรมนูญศาลยุติธรรม',
+    color: '#6366f1', // Indigo
+    bgClass: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+    borderClass: 'border-indigo-500',
+    textClass: 'text-indigo-600',
+  },
+  bankrupt: {
+    id: 'bankrupt',
+    name: 'พ.ร.บ.ล้มละลาย',
+    color: '#ec4899', // Pink
+    bgClass: 'bg-pink-50 text-pink-700 border-pink-200',
+    borderClass: 'border-pink-500',
+    textClass: 'text-pink-600',
+  },
+  custom: {
+    id: 'custom',
+    name: 'ระบุตรากฎหมายอื่นๆ',
+    color: '#8b5cf6', // Violet
+    bgClass: 'bg-violet-50 text-violet-700 border-violet-200',
+    borderClass: 'border-violet-500',
+    textClass: 'text-violet-600',
+  },
 };
+
+export function getCategoryConfig(catId: string): LawCategoryConfig {
+  if (catId in LAW_CATEGORIES) {
+    return LAW_CATEGORIES[catId];
+  }
+  if (catId && catId.startsWith('custom_')) {
+    const customName = catId.substring(7);
+    return {
+      id: catId,
+      name: customName,
+      color: '#8b5cf6', // Violet
+      bgClass: 'bg-violet-50 text-violet-700 border-violet-200',
+      borderClass: 'border-violet-500',
+      textClass: 'text-violet-600',
+    };
+  }
+  return {
+    id: catId || 'custom',
+    name: catId || 'กฎหมายอื่นๆ',
+    color: '#64748b', // Slate
+    bgClass: 'bg-slate-50 text-slate-700 border-slate-200',
+    borderClass: 'border-slate-500',
+    textClass: 'text-slate-600',
+  };
+}
 
 export interface LawSession {
   groupId: string;

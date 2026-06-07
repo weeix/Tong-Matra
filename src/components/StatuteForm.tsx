@@ -11,6 +11,7 @@ interface StatuteFormProps {
 export default function StatuteForm({ onSync, isSyncing, syncProgress }: StatuteFormProps) {
   const [category, setCategory] = useState<LawCategory>('crim');
   const [sections, setSections] = useState<string>('');
+  const [customLawName, setCustomLawName] = useState<string>('');
   const [customStartDate, setCustomStartDate] = useState<string>(() => {
     const today = new Date();
     const year = today.getFullYear();
@@ -35,11 +36,21 @@ export default function StatuteForm({ onSync, isSyncing, syncProgress }: Statute
       return;
     }
 
+    let finalCategory: string = category;
+    if (category === 'custom') {
+      if (!customLawName.trim()) {
+        setError('กรุณาระบุชื่อ พ.ร.บ. หรือตรากฎหมายอื่นที่คุณต้องการทบทวน');
+        return;
+      }
+      finalCategory = `custom_${customLawName.trim()}`;
+    }
+
     const startDate = new Date(customStartDate + 'T12:00:00'); // Midday to maintain robust timezone calculations
-    await onSync(category, sections.trim(), startDate);
+    await onSync(finalCategory, sections.trim(), startDate);
     
     // Clear form on success
     setSections('');
+    setCustomLawName('');
   };
 
   // Pre-calculate target dates for display
@@ -107,6 +118,32 @@ export default function StatuteForm({ onSync, isSyncing, syncProgress }: Statute
             ))}
           </div>
         </div>
+
+        {/* Custom Law Name Input (revealed dynamically) */}
+        {category === 'custom' && (
+          <div className="bg-violet-50/50 border border-violet-100 p-4 rounded-2xl mt-1 space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
+            <label htmlFor="custom-law-input" className="block text-[11px] font-bold uppercase tracking-wider text-violet-700">
+              ชื่อ พ.ร.บ. หรือชื่อกฎหมายของคุณ
+            </label>
+            <div className="relative">
+              <input
+                id="custom-law-input"
+                type="text"
+                value={customLawName}
+                onChange={(e) => setCustomLawName(e.target.value)}
+                placeholder="เช่น พ.ร.บ.คอมพิวเตอร์ หรือ พ.ร.บ.คุ้มครองข้อมูลส่วนบุคคล (PDPA)"
+                disabled={isSyncing}
+                className="w-full pl-3 pr-10 py-2.5 text-sm border border-violet-250 rounded-xl bg-white placeholder-slate-450 focus:outline-none focus:ring-1 focus:ring-violet-500 focus:border-violet-500 text-slate-800"
+              />
+              <span className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-violet-500 font-bold font-mono">
+                ✎
+              </span>
+            </div>
+            <p className="text-[10px] text-violet-600 font-normal leading-relaxed">
+              * ชื่อกฎหมายที่คุณป้อนจะแสดงเป็นตรากฎหมายเฉพาะร่วมกับมาตราต่างๆ บนหน้ากระดานและปฏิทิน Google Calendar ของคุณโดยตรง
+            </p>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Section list field */}

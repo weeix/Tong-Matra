@@ -1,4 +1,4 @@
-import { GoogleCalendarEvent, LawCategory, LAW_CATEGORIES } from '../types';
+import { GoogleCalendarEvent, LawCategory, LAW_CATEGORIES, getCategoryConfig } from '../types';
 
 /**
  * Interface representing options to initialize the GoogleCalendarService
@@ -397,13 +397,14 @@ export function generateEventDetails(privateProperties: Record<string, string>) 
   const listItems: string[] = [];
   const summaryParts: string[] = [];
 
-  for (const catKey of Object.keys(LAW_CATEGORIES)) {
+  for (const catKey of Object.keys(sectionsByCat)) {
     const cat = catKey as LawCategory;
     const items = sectionsByCat[cat];
     if (items && items.length > 0) {
       const combinedSecs = items.join(', ');
-      summaryParts.push(`${LAW_CATEGORIES[cat].name} ม. ${combinedSecs}`);
-      listItems.push(`• ${LAW_CATEGORIES[cat].name} มาตรา: ${combinedSecs}`);
+      const config = getCategoryConfig(cat);
+      summaryParts.push(`${config.name} ม. ${combinedSecs}`);
+      listItems.push(`• ${config.name} มาตรา: ${combinedSecs}`);
     }
   }
 

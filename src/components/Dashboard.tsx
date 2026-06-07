@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { GoogleCalendarEvent, LawCategory, LAW_CATEGORIES } from '../types';
+import { GoogleCalendarEvent, LawCategory, LAW_CATEGORIES, getCategoryConfig } from '../types';
 import { LawSessionDetail, deleteSRSSchedule } from '../lib/calendar';
 import { Calendar, Trash2, ShieldAlert, ListFilter, RefreshCw, BookOpen, Clock, Grid2X2 } from 'lucide-react';
 
@@ -196,7 +196,7 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {sessions.map((sess) => {
-              const categoryDetails = LAW_CATEGORIES[sess.category];
+              const categoryDetails = getCategoryConfig(sess.category);
               return (
                 <div
                   key={sess.groupId}
@@ -318,7 +318,7 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
 
                   <div className="p-4 space-y-3">
                     {day.items.map((item, idx) => {
-                      const categoryDetails = LAW_CATEGORIES[item.category];
+                      const categoryDetails = getCategoryConfig(item.category);
                       return (
                         <div
                           key={`${item.groupId}-${idx}`}
@@ -374,7 +374,7 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
               
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
                 <div className="font-bold text-slate-800">
-                  {LAW_CATEGORIES[sessionToDelete.category]?.name}
+                  {getCategoryConfig(sessionToDelete.category)?.name}
                 </div>
                 <div className="font-mono text-slate-700 mt-1">
                   กลุ่มมาตรา: {sessionToDelete.sections}

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { GoogleCalendarEvent, LawCategory, LAW_CATEGORIES, getCategoryConfig } from '../types';
 import { LawSessionDetail, deleteSRSSchedule, updateSRSSchedule } from '../lib/calendar';
+import { reportError } from '../lib/errorLog';
 import { Calendar, Trash2, ShieldAlert, ListFilter, RefreshCw, BookOpen, Clock, Grid2X2, Pencil } from 'lucide-react';
 
 interface DashboardProps {
@@ -104,6 +105,7 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
       await onRefresh();
     } catch (err) {
       console.error('Cascade deletion failed:', err);
+      reportError(err, 'handleDeleteConfirm');
       alert(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการลบ');
     } finally {
       setIsDeleting(false);
@@ -149,6 +151,7 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
       await onRefresh();
     } catch (err) {
       console.error('Schedule update failed:', err);
+      reportError(err, 'handleEditConfirm');
       alert(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการแก้ไข');
     } finally {
       setIsEditing(false);

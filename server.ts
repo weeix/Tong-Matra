@@ -9,6 +9,15 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Log any uncaught exception / unhandled rejection to stdout so it is
+  // observable in docker logs / Cloud Run / hosted VM stdout.
+  process.on('uncaughtException', (err) => {
+    console.error('[server-error] uncaughtException:', err?.message, err?.stack);
+  });
+  process.on('unhandledRejection', (reason) => {
+    console.error('[server-error] unhandledRejection:', reason);
+  });
+
   // Configure JSON and URLencoded middleware
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
@@ -16,6 +25,60 @@ async function startServer() {
   // API routes first
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });
+  });
+
+  // Client -> server error reporting. The browser POSTs sanitized error
+  // details here; we write them to stdout and answer 204. Never crashes.
+  const MAX_FIELD_BYTES = 4096;
+  const MAX_TOTAL_BYTES = 16384;
+
+  function sanitizeField(value: unknown): string {
+    if (value === null || value === undefined) return '';
+    let text: string;
+    if (typeof value === 'string') {
+      text = value;
+    } else {
+      try {
+        text = JSON.stringify(value);
+      } catch {
+        text = String(value);
+      }
+    }
+    return text.slice(0, MAX_FIELD_BYTES);
+  }
+
+  app.post('/api/error-log', (req, res) => {
+    try {
+      const body = (req.body && typeof req.body === 'object') ? req.body : {};
+      const fields: Record<string, string> = {};
+      let total = 0;
+      for (const key of ['message', 'stack', 'url', 'userAgent', 'hint'] as const) {
+        let val = sanitizeField(body[key]);
+        const remaining = MAX_TOTAL_BYTES - total;
+        if (remaining <= 0) {
+          val = '';
+        } else if (val.length > remaining) {
+          val = val.slice(0, remaining);
+        }
+        fields[key] = val;
+        total += val.length;
+      }
+
+      console.error('[client-error]', {
+        message: fields.message,
+        stack: fields.stack,
+        url: fields.url,
+        userAgent: fields.userAgent,
+        hint: fields.hint,
+        ts: new Date().toISOString(),
+      });
+
+      res.status(204).end();
+    } catch (err) {
+      // The reporting endpoint itself must never crash.
+      console.error('[client-error] failed to process report:', err);
+      res.status(204).end();
+    }
   });
 
   // API endpoint for retrieving Google authorization URL
@@ -171,6 +234,23 @@ async function startServer() {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+
+  // Global Express error handler: log uncaught /api errors to stdout without
+  // leaking stack traces to the client. Must be registered last (4-arg).
+  app.use((err: unknown, req: any, res: any, _next: any) => {
+    const e = err as any;
+    console.error('[server-error]', {
+      message: e?.message ?? String(err),
+      stack: e?.stack,
+      method: req.method,
+      url: req.originalUrl,
+      ts: new Date().toISOString(),
+    });
+    if (res.headersSent) {
+      return;
+    }
+    res.status(500).json({ error: 'Internal Server Error' });
+  });
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);

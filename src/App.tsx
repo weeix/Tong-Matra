@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { CustomUser, getStoredAuth, setStoredAuth, requestGoogleSignIn, checkAuthCallback, getGoogleClientId } from './lib/auth';
 import { fetchAppEvents, parseStudySessions, syncSRSSchedule, LawSessionDetail } from './lib/calendar';
+import { reportError } from './lib/errorLog';
 import { GoogleCalendarEvent, LawCategory } from './types';
 import StatuteForm from './components/StatuteForm';
 import Dashboard from './components/Dashboard';
@@ -105,6 +106,7 @@ export default function App() {
       setSessions(parsed);
     } catch (err) {
       console.error('Failed to load events:', err);
+      reportError(err, 'loadCalendarMetadata');
       setErrorEvents('Unable to retrieve synchronization events from Google Calendar. Access might be expired.');
     } finally {
       setIsLoadingEvents(false);
@@ -128,6 +130,7 @@ export default function App() {
       navigate('/');
     } catch (err) {
       console.error('Error scheduling srs sequence:', err);
+      reportError(err, 'handleSyncSubmit');
       alert(err instanceof Error ? err.message : 'Scheduling sequence failed');
     } finally {
       setIsSyncing(false);

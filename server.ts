@@ -9,6 +9,27 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // The app's own public origin, derived from APP_URL. Used to pin the OAuth
+  // postMessage target and to allow-list redirect_uri/state values.
+  const APP_URL = process.env.APP_URL || '';
+  let appOrigin = '';
+  try {
+    appOrigin = APP_URL ? new URL(APP_URL).origin : '';
+  } catch {
+    console.error('[server-error] APP_URL is not a valid URL; OAuth redirect validation will reject all custom redirect_uris');
+  }
+
+  // Validate a candidate OAuth redirect URI against the app's own origin.
+  function isAllowedRedirectUri(candidate: string): boolean {
+    if (!appOrigin) return false;
+    try {
+      const url = new URL(candidate);
+      return url.origin === appOrigin && url.pathname.replace(/\/+$/, '') === '/auth/callback';
+    } catch {
+      return false;
+    }
+  }
+
   // Log any uncaught exception / unhandled rejection to stdout so it is
   // observable in docker logs / Cloud Run / hosted VM stdout.
   process.on('uncaughtException', (err) => {
@@ -88,6 +109,10 @@ async function startServer() {
       return res.status(400).json({ error: 'Missing redirect_uri query parameter' });
     }
 
+    if (!isAllowedRedirectUri(redirect_uri as string)) {
+      return res.status(400).json({ error: 'redirect_uri is not an allowed callback URL for this app' });
+    }
+
     const client_id = process.env.GOOGLE_CLIENT_ID;
     if (!client_id) {
       return res.status(500).json({ error: 'GOOGLE_CLIENT_ID environment variable is not configured on the server.' });
@@ -115,7 +140,14 @@ async function startServer() {
       return res.status(400).send('Missing authorization code');
     }
 
-    const redirectUri = (state as string) || `${req.protocol}://${req.get('host')}/auth/callback`;
+    const stateUri = typeof state === 'string' ? state : '';
+    const redirectUri = stateUri
+      ? stateUri
+      : `${req.protocol}://${req.get('host')}/auth/callback`;
+
+    if (stateUri && !isAllowedRedirectUri(stateUri)) {
+      return res.status(400).send('Invalid OAuth state');
+    }
 
     try {
       const client_id = process.env.GOOGLE_CLIENT_ID;
@@ -174,6 +206,29 @@ async function startServer() {
       }
 
       // Successful token exchange and profile fetch: send postMessage to parent window and close popup
+      const postMessageOrigin = appOrigin || null;
+
+      // Build the success-page script. Only postMessage when we have a pinned
+      // origin; never emit a wildcard target ('*') or a literal 'null'.
+      const postMessageScript = postMessageOrigin
+        ? `if (window.opener) {
+                window.opener.postMessage({
+                  type: 'OAUTH_AUTH_SUCCESS',
+                  token: ${JSON.stringify(accessToken)},
+                  user: ${JSON.stringify(userProfile)}
+                }, ${JSON.stringify(postMessageOrigin)});
+                setTimeout(() => {
+                  window.close();
+                }, 1000);
+              } else {
+                window.location.href = '/';
+              }`
+        : `if (window.opener) {
+                window.close();
+              } else {
+                window.location.href = '/';
+              }`;
+
       res.send(`
         <html>
           <head>
@@ -187,18 +242,7 @@ async function startServer() {
               <button onclick="window.close()" style="background-color: #4f46e5; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; font-weight: 600; font-size: 0.875rem; cursor: pointer; transition: background-color 0.2s;">ปิดหน้าต่างนี้</button>
             </div>
             <script>
-              if (window.opener) {
-                window.opener.postMessage({
-                  type: 'OAUTH_AUTH_SUCCESS',
-                  token: ${JSON.stringify(accessToken)},
-                  user: ${JSON.stringify(userProfile)}
-                }, '*');
-                setTimeout(() => {
-                  window.close();
-                }, 1000);
-              } else {
-                window.location.href = '/';
-              }
+              ${postMessageScript}
             </script>
           </body>
         </html>

@@ -1,20 +1,58 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Tong Matra (ท่องมาตรา)
 
-# Run and deploy your AI Studio app
+A Thai law-study spaced-repetition planner that syncs memorization schedules to
+Google Calendar. Built for Thai law students and legal professionals.
 
-This contains everything you need to run your app locally.
+## Prerequisites
 
-View your app in AI Studio: https://ai.studio/apps/d2b3d524-ab5d-46bb-9d71-50a3f037b58d
+- Node.js (20+)
 
-## Run Locally
-
-**Prerequisites:**  Node.js
-
+## Setup
 
 1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+
+   ```sh
+   npm install
+   ```
+
+2. Configure environment variables. Copy `.env.example` to `.env` (and/or
+   `.env.local` for Vite) and fill in the values:
+
+   | Variable                | Used by     | Purpose                                                            |
+   |-------------------------|-------------|--------------------------------------------------------------------|
+   | `GOOGLE_CLIENT_ID`      | server      | Google Cloud Console OAuth Client ID (`server.ts`)                 |
+   | `GOOGLE_CLIENT_SECRET`  | server      | Google Cloud Console OAuth Client Secret (`server.ts`)             |
+   | `APP_URL`               | server      | Public origin of the app; pins the OAuth redirect target           |
+   | `VITE_GOOGLE_CLIENT_ID` | client build| OAuth Client ID baked into the bundle (`src/lib/auth.ts`)          |
+
+   The server also honors `PORT` (defaults to `3000`).
+
+## Development
+
+```sh
+npm run dev
+```
+
+Runs the Express server with Vite in middleware mode.
+
+## Production
+
+```sh
+npm run build
+npm start
+```
+
+`npm run build` produces the client bundle and bundles `server.ts` to
+`dist/server.cjs`; `npm start` serves the built app.
+
+## Tests
+
+```sh
+npm test
+```
+
+## Lint / typecheck
+
+```sh
+npm run lint
+```

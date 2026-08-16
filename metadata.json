@@ -1,6 +1,5 @@
 {
   "name": "Tong Matra (ท่องมาตรา)",
   "description": "ระบบวางแผนและจดจำมาตรากฎหมายด้วยหลักการ Spaced Repetition เชื่อมต่อกับ Google Calendar ปรับปรุงเพื่อนักศึกษากฎหมายและนักกฎหมายชาวไทย",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "requestFramePermissions": []
 }

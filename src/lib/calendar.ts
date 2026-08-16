@@ -80,6 +80,7 @@ export class GoogleCalendarService {
     const groupId = generateUUID();
     const offsets = [0, 2, 5, 30];
     const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const normalizedSections = normalizeSections(sections);
 
     for (let i = 0; i < offsets.length; i++) {
       const offset = offsets[i];
@@ -105,15 +106,15 @@ export class GoogleCalendarService {
 
         // Track session and add identifiers
         privateProps[`g_${groupId}`] = 'true';
-        privateProps[`sess_${groupId}`] = `${category}:${sections}`;
+        privateProps[`sess_${groupId}`] = `${category}:${normalizedSections}`;
 
         // Refresh sec_* based on instructions
         const keySuffix = `sec_${category}`;
         const previousValue = privateProps[keySuffix];
         if (previousValue) {
-          privateProps[keySuffix] = `${previousValue}, ${sections}`;
+          privateProps[keySuffix] = normalizeSections(`${previousValue}, ${normalizedSections}`);
         } else {
-          privateProps[keySuffix] = sections;
+          privateProps[keySuffix] = normalizedSections;
         }
 
         // Refresh summary & description based on updated values
@@ -140,8 +141,8 @@ export class GoogleCalendarService {
         const privateProps: Record<string, string> = {
           appId: 'law-srs-app-v1',
           [`g_${groupId}`]: 'true',
-          [`sess_${groupId}`]: `${category}:${sections}`,
-          [`sec_${category}`]: sections,
+          [`sess_${groupId}`]: `${category}:${normalizedSections}`,
+          [`sec_${category}`]: normalizedSections,
         };
 
         const { summary, description } = generateEventDetails(privateProps);
@@ -292,6 +293,26 @@ export function formatDateISO(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+/**
+ * Normalize a raw statute-section list so that every comma is followed by a
+ * single space. This keeps word-selection/tokenization ('ตัดคำ') on statute
+ * numbers working correctly downstream.
+ *
+ * Examples:
+ *   '288,289'       -> '288, 289'
+ *   '288 , 289'     -> '288, 289'
+ *   '288, 289,300'  -> '288, 289, 300'
+ *   '288,,289'      -> '288, 289'
+ *   '288, '         -> '288'
+ */
+export function normalizeSections(raw: string): string {
+  return raw
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+    .join(', ');
 }
 
 export interface LawSessionDetail {

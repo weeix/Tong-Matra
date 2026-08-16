@@ -4,11 +4,34 @@ import {
   formatDateISO, 
   parseStudySessions, 
   generateEventDetails,
+  normalizeSections,
   GoogleCalendarService
 } from './calendar';
 import { GoogleCalendarEvent } from '../types';
 
 describe('Calendar Utils', () => {
+  describe('normalizeSections', () => {
+    it('adds a space after commas where missing', () => {
+      expect(normalizeSections('288,289')).toBe('288, 289');
+      expect(normalizeSections('288, 289,300')).toBe('288, 289, 300');
+    });
+
+    it('trims whitespace around each part', () => {
+      expect(normalizeSections('288 , 289')).toBe('288, 289');
+      expect(normalizeSections(' 288 , 289 ')).toBe('288, 289');
+    });
+
+    it('drops empty parts', () => {
+      expect(normalizeSections('288,,289')).toBe('288, 289');
+      expect(normalizeSections('288, ')).toBe('288');
+      expect(normalizeSections(',,')).toBe('');
+    });
+
+    it('leaves already-normalized input unchanged', () => {
+      expect(normalizeSections('288, 289')).toBe('288, 289');
+    });
+  });
+
   describe('generateUUID', () => {
     it('generates a valid matching-length string', () => {
       const uuid1 = generateUUID();

@@ -1,13 +1,30 @@
 import express from 'express';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-async function startServer() {
+// True when this file is the process entry point (run directly), false when
+// imported (e.g. by the test suite). The source is ESM (package.json
+// "type": "module"), but `npm run build` bundles it to CJS with esbuild, which
+// replaces `import.meta` with an empty object — so we can't rely on
+// `import.meta.url` in the bundle. `__filename` exists in the CJS bundle but
+// not in ESM, hence the fallback.
+function isMainModule(): boolean {
+  if (!process.argv[1]) return false;
+  const selfPath =
+    typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
+  try {
+    return path.resolve(process.argv[1]) === path.resolve(selfPath);
+  } catch {
+    return false;
+  }
+}
+
+export async function createApp() {
   const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
 
   // The app's own public origin, derived from APP_URL. Used to pin the OAuth
   // postMessage target and to allow-list redirect_uri/state values.
@@ -296,9 +313,19 @@ async function startServer() {
     res.status(500).json({ error: 'Internal Server Error' });
   });
 
+  return app;
+}
+
+async function startServer() {
+  const app = await createApp();
+  const PORT = Number(process.env.PORT) || 3000;
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }
 
-startServer();
+// Only start the listener when this file is the entry point, not when
+// imported by tests.
+if (isMainModule()) {
+  startServer();
+}

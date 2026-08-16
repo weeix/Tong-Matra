@@ -7,7 +7,7 @@ dotenv.config();
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // The app's own public origin, derived from APP_URL. Used to pin the OAuth
   // postMessage target and to allow-list redirect_uri/state values.

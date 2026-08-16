@@ -10,8 +10,12 @@ export const getStoredAuth = (): { user: CustomUser | null; token: string | null
     return { user: null, token: null };
   }
   try {
-    const token = sessionStorage.getItem('google_calendar_token') || localStorage.getItem('google_calendar_token');
-    const userStr = sessionStorage.getItem('auth_user') || localStorage.getItem('auth_user');
+    // Legacy cleanup: tokens used to be mirrored to localStorage. Remove any
+    // leftover copies instead of honoring them.
+    localStorage.removeItem('google_calendar_token');
+    localStorage.removeItem('auth_user');
+    const token = sessionStorage.getItem('google_calendar_token');
+    const userStr = sessionStorage.getItem('auth_user');
     const user = userStr ? JSON.parse(userStr) : null;
     return { user, token };
   } catch (error) {
@@ -23,16 +27,16 @@ export const getStoredAuth = (): { user: CustomUser | null; token: string | null
 // Set stored credentials
 export const setStoredAuth = (user: CustomUser | null, token: string | null) => {
   if (typeof window === 'undefined') return;
+  // Always clear any legacy localStorage copies so old persisted tokens
+  // from previous versions are wiped on next login/logout.
+  localStorage.removeItem('google_calendar_token');
+  localStorage.removeItem('auth_user');
   if (token && user) {
     sessionStorage.setItem('google_calendar_token', token);
     sessionStorage.setItem('auth_user', JSON.stringify(user));
-    localStorage.setItem('google_calendar_token', token);
-    localStorage.setItem('auth_user', JSON.stringify(user));
   } else {
     sessionStorage.removeItem('google_calendar_token');
     sessionStorage.removeItem('auth_user');
-    localStorage.removeItem('google_calendar_token');
-    localStorage.removeItem('auth_user');
   }
 };
 

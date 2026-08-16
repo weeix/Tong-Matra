@@ -209,13 +209,13 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
                     style={{ backgroundColor: categoryDetails?.color || '#a8a29e' }}
                   />
 
-                  <div className="flex items-start justify-between mt-1">
-                    <div>
+                  <div className="flex items-start justify-between mt-1 gap-3">
+                    <div className="min-w-0 flex-1">
                       {/* Badge indicator */}
                       <span className={`inline-flex items-center text-[10px] px-2 py-0.5 rounded font-bold tracking-wide border ${categoryDetails?.bgClass || 'bg-slate-50 border-slate-200 text-slate-600'}`}>
                         {categoryDetails?.name || 'กฎหมายไม่ระบุ'}
                       </span>
-                      <h4 className="font-mono text-base font-bold text-slate-900 mt-2">
+                      <h4 className="font-mono text-base font-bold text-slate-900 mt-2 break-words">
                         มาตรา: {sess.sections}
                       </h4>
                     </div>
@@ -223,7 +223,7 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
                     <button
                       id={`delete-session-btn-${sess.groupId}`}
                       onClick={() => setSessionToDelete(sess)}
-                      className="p-1 px-2 border border-slate-200 text-slate-400 hover:text-red-600 hover:border-red-200 rounded-lg hover:bg-red-50 transition-all cursor-pointer"
+                      className="p-1 px-2 border border-slate-200 text-slate-400 hover:text-red-600 hover:border-red-200 rounded-lg hover:bg-red-50 transition-all cursor-pointer shrink-0"
                       title="ยกเลิกกำหนดการและถอนมาตรารอบนี้จากปฏิทิน"
                     >
                       <Trash2 size={14} />
@@ -324,22 +324,22 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
                           key={`${item.groupId}-${idx}`}
                           className="flex items-center justify-between p-3 border border-slate-100 bg-slate-50/30 hover:bg-slate-50/80 rounded-xl transition-all"
                         >
-                          <div className="flex items-start space-x-3">
+                          <div className="flex items-start space-x-3 min-w-0 flex-1">
                             <div
                               className="w-2.5 h-2.5 rounded-full mt-1 shrink-0"
                               style={{ backgroundColor: categoryDetails?.color || '#a8a29e' }}
                             />
-                            <div>
+                            <div className="min-w-0">
                               <span className="text-xs font-bold text-slate-900">
                                 {categoryDetails?.name}
                               </span>
-                              <div className="font-mono text-sm font-semibold text-slate-800 mt-0.5">
+                              <div className="font-mono text-sm font-semibold text-slate-800 mt-0.5 break-words">
                                 มาตรา: {item.sections}
                               </div>
                             </div>
                           </div>
                           
-                          <div className="text-[10px] font-mono text-slate-400 uppercase tracking-widest text-right">
+                          <div className="text-[10px] font-mono text-slate-400 uppercase tracking-widest text-right shrink-0">
                             รหัสแผน: {item.groupId.substring(0, 8)}
                           </div>
                         </div>

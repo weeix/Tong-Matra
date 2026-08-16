@@ -152,14 +152,14 @@ export default function StatuteForm({ onSync, isSyncing, syncProgress }: Statute
               เลขมาตราที่ต้องการท่องจำ
             </label>
             <div className="relative">
-              <input
+              <textarea
                 id="sections-input"
-                type="text"
+                rows={2}
                 placeholder="เช่น 170-185 หรือ 288, 289"
                 value={sections}
                 onChange={(e) => setSections(e.target.value)}
                 disabled={isSyncing}
-                className="w-full pl-3 pr-10 py-2 text-sm border border-slate-200 rounded-xl bg-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                className="w-full pl-3 pr-10 py-2 text-sm border border-slate-200 rounded-xl bg-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 resize-y leading-snug"
               />
               <span className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
                 §

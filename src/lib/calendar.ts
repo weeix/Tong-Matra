@@ -268,6 +268,91 @@ export class GoogleCalendarService {
 
     onProgress?.('ลบแผนการเรียนรู้และปรับปรุงกิจกรรมสำเร็จเรียบร้อย!');
   }
+
+  /**
+   * Update the statute-section list for an existing study plan across all of
+   * its Google Calendar revision-day events.
+   */
+  async updateSRSSchedule(
+    groupId: string,
+    category: LawCategory,
+    newSections: string,
+    onProgress?: (msg: string) => void
+  ): Promise<void> {
+    onProgress?.('กำลังค้นหากิจกรรมบนปฏิทิน...');
+
+    const normalizedSections = normalizeSections(newSections);
+
+    // Find all events sharing this groupId
+    const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?privateExtendedProperty=g_${groupId}=true&singleEvents=true`;
+    const result = await this.authorizedFetch(url);
+    const matchedEvents: GoogleCalendarEvent[] = result.items || [];
+
+    if (matchedEvents.length === 0) {
+      onProgress?.('ไม่พบกิจกรรมทบทวนที่ตรงกันในปฏิทินของคุณ');
+      return;
+    }
+
+    onProgress?.(`พบ ${matchedEvents.length} วันกิจกรรม. กำลังปรับปรุงข้อมูลมาตรา...`);
+
+    for (let idx = 0; idx < matchedEvents.length; idx++) {
+      const event = matchedEvents[idx];
+      const privateProps = { ...(event.extendedProperties?.private || {}) } as Record<string, string>;
+
+      // Update this session's stored sections
+      privateProps[`sess_${groupId}`] = `${category}:${normalizedSections}`;
+
+      // Rebuild clean props (g_*, sess_*) from surviving sessions
+      const cleanProps: Record<string, string> = {
+        appId: 'law-srs-app-v1',
+      };
+
+      for (const k of Object.keys(privateProps)) {
+        if (k.startsWith('g_') || k.startsWith('sess_')) {
+          cleanProps[k] = privateProps[k];
+        }
+      }
+
+      // Recompute summary/description and sec_* aggregates from surviving sessions
+      const { summary, description, sectionsByCat } = generateEventDetails(cleanProps);
+
+      for (const catKey of Object.keys(sectionsByCat)) {
+        const cat = catKey as LawCategory;
+        const items = sectionsByCat[cat];
+        if (items && items.length > 0) {
+          cleanProps[`sec_${cat}`] = items.join(', ');
+        }
+      }
+
+      // Any key in the original event's private property that is NOT in cleanProps
+      // must be explicitly set to null to delete it via PATCH merge
+      const patchProps: Record<string, string | null> = { ...cleanProps };
+      const originalPrivate = event.extendedProperties?.private || {};
+      for (const k of Object.keys(originalPrivate)) {
+        if (!(k in cleanProps)) {
+          patchProps[k] = null;
+        }
+      }
+
+      const updateBody = {
+        summary,
+        description,
+        extendedProperties: {
+          private: patchProps,
+        },
+      };
+
+      onProgress?.(`กำลังปรับปรุงข้อมูลวันที่ ${event.start?.dateTime?.split('T')[0] || event.start?.date}...`);
+
+      const updateUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events/${event.id}`;
+      await this.authorizedFetch(updateUrl, {
+        method: 'PATCH',
+        body: JSON.stringify(updateBody),
+      });
+    }
+
+    onProgress?.('ปรับปรุงแผนการเรียนรู้สำเร็จเรียบร้อย!');
+  }
 }
 
 /**
@@ -466,5 +551,16 @@ export async function deleteSRSSchedule(
 ): Promise<void> {
   const service = new GoogleCalendarService({ token });
   return service.deleteSRSSchedule(groupId, category, onProgress);
+}
+
+export async function updateSRSSchedule(
+  token: string,
+  groupId: string,
+  category: LawCategory,
+  newSections: string,
+  onProgress?: (msg: string) => void
+): Promise<void> {
+  const service = new GoogleCalendarService({ token });
+  return service.updateSRSSchedule(groupId, category, newSections, onProgress);
 }
 

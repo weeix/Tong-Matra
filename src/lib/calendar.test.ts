@@ -234,6 +234,120 @@ describe('Calendar Utils', () => {
       expect(recordedSteps[2]).toContain('Day +5');
       expect(recordedSteps[3]).toContain('Day +30');
     });
+
+    it('updateSRSSchedule patches every matched event and preserves overlapping sessions', async () => {
+      const patchBodies: any[] = [];
+      const patchUrls: string[] = [];
+
+      const event1: GoogleCalendarEvent = {
+        id: 'ev1',
+        summary: '[ทบทวนกฎหมาย] ประมวลกฎหมายอาญา ม. 288, 289',
+        start: { dateTime: '2026-06-01T09:00:00Z' },
+        end: { dateTime: '2026-06-01T10:00:00Z' },
+        extendedProperties: {
+          private: {
+            appId: 'law-srs-app-v1',
+            g_grp1: 'true',
+            sess_grp1: 'crim:288, 289',
+            g_grp2: 'true',
+            sess_grp2: 'civ:420, 421',
+            sec_crim: '288, 289',
+            sec_civ: '420, 421',
+          },
+        },
+      };
+
+      const event2: GoogleCalendarEvent = {
+        id: 'ev2',
+        summary: '[ทบทวนกฎหมาย] ประมวลกฎหมายอาญา ม. 288, 289',
+        start: { date: '2026-06-03' },
+        end: { date: '2026-06-03' },
+        extendedProperties: {
+          private: {
+            appId: 'law-srs-app-v1',
+            g_grp1: 'true',
+            sess_grp1: 'crim:288, 289',
+            sec_crim: '288, 289',
+          },
+        },
+      };
+
+      const mockFetch: typeof fetch = async (url, options) => {
+        if (options?.method === 'PATCH') {
+          patchUrls.push(url.toString());
+          patchBodies.push(JSON.parse(options.body as string));
+          return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ items: [event1, event2] }),
+        } as unknown as Response;
+      };
+
+      const service = new GoogleCalendarService({ token: 't', fetchFn: mockFetch });
+      await service.updateSRSSchedule('grp1', 'crim', '288, 289, 300');
+
+      expect(patchUrls).toHaveLength(2);
+      expect(patchUrls[0]).toContain('/events/ev1');
+      expect(patchUrls[1]).toContain('/events/ev2');
+
+      // event1: overlapping session grp2 preserved, grp1 sections updated
+      const body1 = patchBodies[0];
+      expect(body1.extendedProperties.private['sess_grp1']).toBe('crim:288, 289, 300');
+      expect(body1.extendedProperties.private['sess_grp2']).toBe('civ:420, 421');
+      expect(body1.extendedProperties.private['sec_crim']).toBe('288, 289, 300');
+      expect(body1.extendedProperties.private['sec_civ']).toBe('420, 421');
+      expect(body1.summary).toContain('288, 289, 300');
+      expect(body1.summary).toContain('420, 421');
+
+      // event2: only grp1 present
+      const body2 = patchBodies[1];
+      expect(body2.extendedProperties.private['sess_grp1']).toBe('crim:288, 289, 300');
+      expect(body2.extendedProperties.private['sec_crim']).toBe('288, 289, 300');
+    });
+
+    it('updateSRSSchedule normalizes raw input and nulls out removed props', async () => {
+      const patchBodies: any[] = [];
+
+      const event: GoogleCalendarEvent = {
+        id: 'ev1',
+        summary: '[ทบทวนกฎหมาย] ประมวลกฎหมายอาญา ม. 288, 289',
+        start: { dateTime: '2026-06-01T09:00:00Z' },
+        end: { dateTime: '2026-06-01T10:00:00Z' },
+        extendedProperties: {
+          private: {
+            appId: 'law-srs-app-v1',
+            g_grp1: 'true',
+            sess_grp1: 'crim:288, 289',
+            sec_crim: '288, 289',
+            sec_stale: 'should-be-removed',
+          },
+        },
+      };
+
+      const mockFetch: typeof fetch = async (_url, options) => {
+        if (options?.method === 'PATCH') {
+          patchBodies.push(JSON.parse(options.body as string));
+          return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ items: [event] }),
+        } as unknown as Response;
+      };
+
+      const service = new GoogleCalendarService({ token: 't', fetchFn: mockFetch });
+      await service.updateSRSSchedule('grp1', 'crim', '288,289');
+
+      const body = patchBodies[0];
+      // raw '288,289' normalized to '288, 289'
+      expect(body.extendedProperties.private['sess_grp1']).toBe('crim:288, 289');
+      expect(body.extendedProperties.private['sec_crim']).toBe('288, 289');
+      // removed prop explicitly nulled for PATCH merge semantics
+      expect(body.extendedProperties.private['sec_stale']).toBeNull();
+    });
   });
 });
 

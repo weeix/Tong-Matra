@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { GoogleCalendarEvent, LawCategory, LAW_CATEGORIES, getCategoryConfig } from '../types';
-import { LawSessionDetail, deleteSRSSchedule } from '../lib/calendar';
-import { Calendar, Trash2, ShieldAlert, ListFilter, RefreshCw, BookOpen, Clock, Grid2X2 } from 'lucide-react';
+import { LawSessionDetail, deleteSRSSchedule, updateSRSSchedule } from '../lib/calendar';
+import { Calendar, Trash2, ShieldAlert, ListFilter, RefreshCw, BookOpen, Clock, Grid2X2, Pencil } from 'lucide-react';
 
 interface DashboardProps {
   events: GoogleCalendarEvent[];
@@ -19,6 +19,13 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
   const [sessionToDelete, setSessionToDelete] = useState<LawSessionDetail | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [deleteProgress, setDeleteProgress] = useState<string>('');
+
+  // Edit plan state
+  const [sessionToEdit, setSessionToEdit] = useState<LawSessionDetail | null>(null);
+  const [editSections, setEditSections] = useState<string>('');
+  const [editError, setEditError] = useState<string>('');
+  const [isEditing, setIsEditing] = useState<boolean>(false);
+  const [editProgress, setEditProgress] = useState<string>('');
 
   // Group events by target date (only for upcoming reviews)
   const getUpcomingSchedule = () => {
@@ -101,6 +108,51 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
     } finally {
       setIsDeleting(false);
       setDeleteProgress('');
+    }
+  };
+
+  // Open the edit modal pre-filled with the current sections
+  const openEditModal = (sess: LawSessionDetail) => {
+    setSessionToEdit(sess);
+    setEditSections(sess.sections);
+    setEditError('');
+    setEditProgress('');
+  };
+
+  // Handle edit save action
+  const handleEditConfirm = async () => {
+    if (!sessionToEdit) return;
+
+    const trimmed = editSections.trim();
+    if (!trimmed) {
+      setEditError('กรุณาระบุเลขมาตราหรือช่วงมาตราที่ต้องการท่องจำ (เช่น "170-185" หรือ "288, 289")');
+      return;
+    }
+
+    const matchedParts = trimmed.match(/^[0-9\s,\-\/a-zA-Z]+$/);
+    if (!matchedParts) {
+      setEditError('รูปแบบมาตราไม่ถูกต้อง โปรดใช้ตัวเลข เครื่องหมายจุลภาค (,) และเครื่องหมายขีดละ (-) (เช่น "420-430, 435")');
+      return;
+    }
+
+    setIsEditing(true);
+    setEditProgress('กำลังปรับปรุงข้อมูลบนปฏิทิน...');
+
+    try {
+      await updateSRSSchedule(token, sessionToEdit.groupId, sessionToEdit.category, trimmed, (msg) => {
+        setEditProgress(msg);
+      });
+
+      // Cleanup
+      setSessionToEdit(null);
+      setEditSections('');
+      await onRefresh();
+    } catch (err) {
+      console.error('Schedule update failed:', err);
+      alert(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการแก้ไข');
+    } finally {
+      setIsEditing(false);
+      setEditProgress('');
     }
   };
 
@@ -220,14 +272,24 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
                       </h4>
                     </div>
 
-                    <button
-                      id={`delete-session-btn-${sess.groupId}`}
-                      onClick={() => setSessionToDelete(sess)}
-                      className="p-1 px-2 border border-slate-200 text-slate-400 hover:text-red-600 hover:border-red-200 rounded-lg hover:bg-red-50 transition-all cursor-pointer shrink-0"
-                      title="ยกเลิกกำหนดการและถอนมาตรารอบนี้จากปฏิทิน"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    <div className="flex items-center space-x-1 shrink-0">
+                      <button
+                        id={`edit-session-btn-${sess.groupId}`}
+                        onClick={() => openEditModal(sess)}
+                        className="p-1 px-2 border border-slate-200 text-slate-400 hover:text-indigo-600 hover:border-indigo-200 rounded-lg hover:bg-indigo-50 transition-all cursor-pointer shrink-0"
+                        title="แก้ไขรายการมาตราในแผนนี้"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        id={`delete-session-btn-${sess.groupId}`}
+                        onClick={() => setSessionToDelete(sess)}
+                        className="p-1 px-2 border border-slate-200 text-slate-400 hover:text-red-600 hover:border-red-200 rounded-lg hover:bg-red-50 transition-all cursor-pointer shrink-0"
+                        title="ยกเลิกกำหนดการและถอนมาตรารอบนี้จากปฏิทิน"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </div>
 
                   <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
@@ -416,6 +478,83 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
                   className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded-xl text-xs transition-all shadow-md shadow-red-600/10 cursor-pointer text-center"
                 >
                   ถอนกำหนดการและลบปฏิทิน
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* STUDY PLAN EDIT DIALOG */}
+      {sessionToEdit && (
+        <div id="edit-plan-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center space-x-3 text-indigo-600 mb-4 border-b border-slate-100 pb-3">
+              <div className="p-2.5 bg-indigo-50 border border-indigo-100 rounded-full">
+                <Pencil size={22} className="text-indigo-600" />
+              </div>
+              <div>
+                <h3 className="font-sans text-base font-black text-slate-900">แก้ไขรายการมาตราในแผน</h3>
+                <p className="text-[11px] text-slate-400">ระบบจะปรับปรุงรายการมาตราในกิจกรรมทบทวนทั้ง 4 วันของแผนนี้โดยอัตโนมัติ</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-600 leading-relaxed">
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                <div className="font-bold text-slate-800">
+                  {getCategoryConfig(sessionToEdit.category)?.name}
+                </div>
+                <div className="text-[10px] text-slate-400 font-mono mt-1.5">
+                  รหัสอ้างอิง: {sessionToEdit.groupId}
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="edit-sections-input" className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
+                  เลขมาตราที่ต้องการท่องจำ
+                </label>
+                <textarea
+                  id="edit-sections-input"
+                  rows={4}
+                  placeholder="เช่น 170-185 หรือ 288, 289"
+                  value={editSections}
+                  onChange={(e) => setEditSections(e.target.value)}
+                  disabled={isEditing}
+                  className="w-full pl-3 pr-3 py-2 text-sm border border-slate-200 rounded-xl bg-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 resize-y leading-snug"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  ระบุเป็นรายมาตรา หรือเป็นช่วงด้วยยัติภังค์ (เช่น <code className="font-mono text-slate-600">420-430, 435</code>)
+                </p>
+              </div>
+
+              {editError && (
+                <div className="flex items-center space-x-2 text-red-600 text-xs bg-red-50 border border-red-100 p-3 rounded-xl">
+                  <ShieldAlert size={14} className="shrink-0" />
+                  <span>{editError}</span>
+                </div>
+              )}
+            </div>
+
+            {isEditing ? (
+              <div className="mt-6 p-4 bg-slate-50 border border-slate-200 rounded-xl text-center flex flex-col items-center justify-center space-y-2">
+                <div className="w-5 h-5 border-2 border-slate-400 border-t-indigo-600 rounded-full animate-spin" />
+                <span className="text-xs font-semibold font-mono text-slate-700">{editProgress}</span>
+              </div>
+            ) : (
+              <div className="mt-6 flex space-x-3">
+                <button
+                  id="cancel-edit-btn"
+                  onClick={() => setSessionToEdit(null)}
+                  className="flex-1 border border-slate-200 hover:border-slate-350 text-slate-700 font-bold py-2 rounded-xl text-xs hover:bg-slate-50 transition-all cursor-pointer text-center"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  id="confirm-edit-btn"
+                  onClick={handleEditConfirm}
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 rounded-xl text-xs transition-all shadow-md shadow-indigo-600/10 cursor-pointer text-center"
+                >
+                  บันทึกการแก้ไข
                 </button>
               </div>
             )}

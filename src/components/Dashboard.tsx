@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { GoogleCalendarEvent, LawCategory, LAW_CATEGORIES, getCategoryConfig } from '../types';
-import { LawSessionDetail, deleteSRSSchedule, updateSRSSchedule } from '../lib/calendar';
+import { LawSessionDetail, deleteSRSSchedule, updateSRSSchedule, migratePlanCycle, findLegacyCycleGroupIds } from '../lib/calendar';
 import { reportError } from '../lib/errorLog';
-import { Calendar, Trash2, ShieldAlert, ListFilter, RefreshCw, BookOpen, Clock, Grid2X2, Pencil } from 'lucide-react';
+import { Calendar, Trash2, ShieldAlert, ListFilter, RefreshCw, BookOpen, Clock, Grid2X2, Pencil, CalendarClock } from 'lucide-react';
 
 interface DashboardProps {
   events: GoogleCalendarEvent[];
@@ -15,6 +15,12 @@ interface DashboardProps {
 
 export default function Dashboard({ events, sessions, onRefresh, isLoading, token, onNavigateToAddPlan }: DashboardProps) {
   const [activeTab, setActiveTab] = useState<'sessions' | 'schedule'>('sessions');
+
+  // Legacy-cycle (+5) migration state
+  const legacyGroupIds = useMemo(() => findLegacyCycleGroupIds(events, sessions), [events, sessions]);
+  const [dismissedMigrationBanner, setDismissedMigrationBanner] = useState<boolean>(false);
+  const [migratingGroupIds, setMigratingGroupIds] = useState<Set<string>>(new Set());
+  const [migrationProgress, setMigrationProgress] = useState<string>('');
 
   // Cascade delete state
   const [sessionToDelete, setSessionToDelete] = useState<LawSessionDetail | null>(null);
@@ -159,6 +165,48 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
     }
   };
 
+  // Migrate one plan's mid-term review from the legacy Day +5 slot to Day +7
+  const migrateSinglePlan = async (sess: LawSessionDetail, refreshAfter: boolean) => {
+    if (migratingGroupIds.has(sess.groupId)) return;
+    setMigratingGroupIds((prev) => new Set(prev).add(sess.groupId));
+    try {
+      await migratePlanCycle(
+        token,
+        sess.groupId,
+        sess.category,
+        new Date(sess.createdDate + 'T12:00:00'),
+        refreshAfter ? setMigrationProgress : undefined
+      );
+      if (refreshAfter) await onRefresh();
+    } catch (err) {
+      console.error('Cycle migration failed:', err);
+      reportError(err, 'migratePlanCycle');
+      if (refreshAfter) {
+        alert(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการย้ายรอบทบทวน');
+      }
+    } finally {
+      setMigratingGroupIds((prev) => {
+        const next = new Set(prev);
+        next.delete(sess.groupId);
+        return next;
+      });
+    }
+  };
+
+  // Migrate every detected legacy-cycle plan sequentially
+  const handleMigrateAll = async () => {
+    const targets = sessions.filter((s) => legacyGroupIds.includes(s.groupId));
+    for (const sess of targets) {
+      // Sequential on purpose: keeps Google Calendar API usage gentle and
+      // lets each migration see fresh state.
+      await migrateSinglePlan(sess, false);
+    }
+    setMigrationProgress('');
+    await onRefresh();
+    setDismissedMigrationBanner(true); // banner disappears once nothing is left to migrate
+  };
+
+
   return (
     <div id="calendar-dashboard" className="space-y-6">
       {/* Header and Sync indicator */}
@@ -196,6 +244,48 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
           </button>
         </div>
       </div>
+
+      {/* LEGACY CYCLE (+5 -> +7) MIGRATION BANNER */}
+      {!isLoading && legacyGroupIds.length > 0 && !dismissedMigrationBanner && (
+        <div id="legacy-cycle-banner" className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+          <div className="flex items-start space-x-3 min-w-0">
+            <div className="p-2 bg-amber-100 border border-amber-200 rounded-xl text-amber-600 shrink-0">
+              <CalendarClock size={18} />
+            </div>
+            <div className="min-w-0">
+              <h4 className="text-xs font-extrabold text-amber-800">
+                พบแผนการท่องจำรอบเก่า {legacyGroupIds.length} แผน (รอบทบทวนรอบกลางอยู่วัน Day +5)
+              </h4>
+              {migratingGroupIds.size > 0 ? (
+                <p className="text-[11px] text-amber-700 mt-0.5 font-mono truncate">{migrationProgress || 'กำลังย้าย...'}</p>
+              ) : (
+                <p className="text-[11px] text-amber-700 mt-0.5 leading-relaxed">
+                  รอบใหม่ใช้ Day +7 ซึ่งครบ 1 สัปดาห์พอดี ช่วยให้ทบทวนในวันเดิมของทุกสัปดาห์ กดเพื่อย้ายแผนเก่าขึ้นรอบใหม่ได้ทันที
+                </p>
+              )}
+            </div>
+          </div>
+          {migratingGroupIds.size === 0 && (
+            <div className="flex items-center space-x-2 shrink-0 self-end sm:self-center">
+              <button
+                id="dismiss-migration-banner-btn"
+                onClick={() => setDismissedMigrationBanner(true)}
+                className="px-3 py-1.5 text-xs font-bold text-amber-700 border border-amber-200 hover:bg-amber-100 rounded-xl transition-all cursor-pointer"
+              >
+                ไม่ต้องย้าย
+              </button>
+              <button
+                id="migrate-all-btn"
+                onClick={handleMigrateAll}
+                disabled={migratingGroupIds.size > 0}
+                className="px-3.5 py-1.5 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl transition-all cursor-pointer shadow-sm active:scale-[0.98] disabled:opacity-50"
+              >
+                ย้ายทั้งหมดเป็น +7
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Main Tabs switcher */}
       <div className="flex border-b border-slate-250">
@@ -276,6 +366,17 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
                     </div>
 
                     <div className="flex items-center space-x-1 shrink-0">
+                      {legacyGroupIds.includes(sess.groupId) && (
+                        <button
+                          id={`migrate-session-btn-${sess.groupId}`}
+                          onClick={() => migrateSinglePlan(sess, true)}
+                          disabled={migratingGroupIds.has(sess.groupId)}
+                          className="p-1 px-2 border border-amber-300 text-amber-500 hover:text-amber-600 hover:border-amber-400 rounded-lg hover:bg-amber-50 transition-all cursor-pointer shrink-0 disabled:opacity-50"
+                          title="ย้ายรอบทบทวนรอบกลางของแผนนี้จาก Day +5 เป็น Day +7"
+                        >
+                          {migratingGroupIds.has(sess.groupId) ? <RefreshCw size={14} className="animate-spin" /> : <CalendarClock size={14} />}
+                        </button>
+                      )}
                       <button
                         id={`edit-session-btn-${sess.groupId}`}
                         onClick={() => openEditModal(sess)}

@@ -5,6 +5,8 @@ import {
   parseStudySessions, 
   generateEventDetails,
   normalizeSections,
+  findLegacyCycleGroupIds,
+  dayOffsetFromStart,
   GoogleCalendarService
 } from './calendar';
 import { GoogleCalendarEvent } from '../types';
@@ -347,6 +349,169 @@ describe('Calendar Utils', () => {
       expect(body.extendedProperties.private['sec_crim']).toBe('288, 289');
       // removed prop explicitly nulled for PATCH merge semantics
       expect(body.extendedProperties.private['sec_stale']).toBeNull();
+    });
+
+    it('migratePlanCycle moves a sole-occupant +5 event to +7 with one PATCH', async () => {
+      const patchBodies: any[] = [];
+      const patchUrls: string[] = [];
+      let postCount = 0;
+
+      const legacyEvent: GoogleCalendarEvent = {
+        id: 'ev_mid',
+        summary: '[ทบทวนกฎหมาย] ประมวลกฎหมายอาญา ม. 288',
+        start: { dateTime: '2026-06-06T09:00:00Z' }, // Day +5 of 2026-06-01
+        end: { dateTime: '2026-06-06T10:00:00Z' },
+        extendedProperties: {
+          private: {
+            appId: 'law-srs-app-v1',
+            g_grp1: 'true',
+            sess_grp1: 'crim:288',
+            sec_crim: '288',
+          },
+        },
+      };
+
+      const mockFetch: typeof fetch = async (url, options) => {
+        if (options?.method === 'PATCH') {
+          patchUrls.push(url.toString());
+          patchBodies.push(JSON.parse(options.body as string));
+          return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
+        }
+        if (options?.method === 'POST') postCount += 1;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ items: [legacyEvent] }),
+        } as unknown as Response;
+      };
+
+      const service = new GoogleCalendarService({ token: 't', fetchFn: mockFetch });
+      await service.migratePlanCycle('grp1', 'crim', new Date(2026, 5, 1));
+
+      expect(postCount).toBe(0); // no split needed
+      expect(patchUrls).toHaveLength(1);
+      expect(patchUrls[0]).toContain('/events/ev_mid');
+      // Moved from June 6 (+5) to June 8 (+7)
+      expect(patchBodies[0].start.dateTime).toContain('2026-06-08');
+      expect(patchBodies[0].end.dateTime).toContain('2026-06-08');
+    });
+
+    it('migratePlanCycle splits a shared +5 event and preserves other sessions', async () => {
+      const createdBodies: any[] = [];
+      const patchBodies: any[] = [];
+
+      const sharedEvent: GoogleCalendarEvent = {
+        id: 'ev_shared',
+        summary: '[ทบทวนกฎหมาย]',
+        start: { dateTime: '2026-06-06T09:00:00Z' }, // Day +5 of 2026-06-01
+        end: { dateTime: '2026-06-06T10:00:00Z' },
+        extendedProperties: {
+          private: {
+            appId: 'law-srs-app-v1',
+            g_grp1: 'true',
+            sess_grp1: 'crim:288',
+            g_grp2: 'true',
+            sess_grp2: 'civ:420',
+            sec_crim: '288',
+            sec_civ: '420',
+          },
+        },
+      };
+
+      const mockFetch: typeof fetch = async (_url, options) => {
+        if (options?.method === 'PATCH') {
+          patchBodies.push(JSON.parse(options.body as string));
+          return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
+        }
+        if (options?.method === 'POST') {
+          createdBodies.push(JSON.parse(options.body as string));
+          return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ items: [sharedEvent] }),
+        } as unknown as Response;
+      };
+
+      const service = new GoogleCalendarService({ token: 't', fetchFn: mockFetch });
+      await service.migratePlanCycle('grp1', 'crim', new Date(2026, 5, 1));
+
+      // 1 POST (new +7 event) + 1 PATCH (strip grp1 off shared +5 event)
+      expect(createdBodies).toHaveLength(1);
+      expect(createdBodies[0].start.dateTime).toContain('2026-06-08');
+      expect(createdBodies[0].extendedProperties.private['sess_grp1']).toBe('crim:288');
+      expect(createdBodies[0].extendedProperties.private['g_grp1']).toBe('true');
+
+      expect(patchBodies).toHaveLength(1);
+      expect(patchBodies[0].extendedProperties.private['sess_grp2']).toBe('civ:420');
+      // removed props must be explicitly nulled for PATCH merge semantics
+      expect(patchBodies[0].extendedProperties.private['sess_grp1']).toBeNull();
+      expect(patchBodies[0].extendedProperties.private['g_grp1']).toBeNull();
+    });
+
+    it('migratePlanCycle is idempotent when no +5 event exists', async () => {
+      let writeCount = 0;
+
+      const currentEvents: GoogleCalendarEvent[] = [
+        {
+          id: 'ev_mid7',
+          summary: '[ทบทวนกฎหมาย] ประมวลกฎหมายอาญา ม. 288',
+          start: { dateTime: '2026-06-08T09:00:00Z' }, // already at +7
+          end: { dateTime: '2026-06-08T10:00:00Z' },
+          extendedProperties: {
+            private: {
+              appId: 'law-srs-app-v1',
+              g_grp1: 'true',
+              sess_grp1: 'crim:288',
+            },
+          },
+        },
+      ];
+
+      const mockFetch: typeof fetch = async (_url, options) => {
+        if (options && options.method && options.method !== 'GET') writeCount += 1;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ items: currentEvents }),
+        } as unknown as Response;
+      };
+
+      const service = new GoogleCalendarService({ token: 't', fetchFn: mockFetch });
+      await service.migratePlanCycle('grp1', 'crim', new Date(2026, 5, 1));
+
+      expect(writeCount).toBe(0); // no-op
+    });
+  });
+
+  describe('findLegacyCycleGroupIds', () => {
+    const baseSession = {
+      groupId: 'grp1',
+      category: 'crim' as const,
+      sections: '288',
+      dates: [] as string[],
+      createdDate: '2026-06-01',
+    };
+
+    it('flags plans whose mid-term event sits on +5 with nothing on +7', () => {
+      const legacy = { ...baseSession, dates: ['2026-06-01', '2026-06-03', '2026-06-06', '2026-07-01'] };
+      expect(findLegacyCycleGroupIds([], [legacy])).toEqual(['grp1']);
+    });
+
+    it('does not flag current-cycle (+7) plans', () => {
+      const current = { ...baseSession, dates: ['2026-06-01', '2026-06-03', '2026-06-08', '2026-07-01'] };
+      expect(findLegacyCycleGroupIds([], [current])).toEqual([]);
+    });
+
+    it('does not double-flag plans that already have both +5 and +7 events', () => {
+      const both = { ...baseSession, dates: ['2026-06-01', '2026-06-03', '2026-06-06', '2026-06-08'] };
+      expect(findLegacyCycleGroupIds([], [both])).toEqual([]);
+    });
+
+    it('computes correct day offsets across month boundaries', () => {
+      expect(dayOffsetFromStart('2026-07-01', '2026-06-26')).toBe(5);
+      expect(dayOffsetFromStart('2026-07-03', '2026-06-26')).toBe(7);
     });
   });
 });

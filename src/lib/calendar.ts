@@ -353,6 +353,145 @@ export class GoogleCalendarService {
 
     onProgress?.('ปรับปรุงแผนการเรียนรู้สำเร็จเรียบร้อย!');
   }
+
+  /**
+   * Migrate a legacy-cycle plan's mid-term review event from Day +5 to
+   * Day +7 (the new cycle).
+   *
+   * - If the +5 event holds ONLY this plan's session: move it in place via a
+   *   single PATCH (keeps the same eventId; preserves any manual edits).
+   * - If the +5 event is SHARED with other plans/sessions: leave it untouched
+   *   and create a fresh +7 event carrying only this session, then strip this
+   *   session from the shared +5 event (same merge semantics as cascade delete).
+   * - Idempotent: if no +5 mid-term event exists anymore, this is a no-op.
+   */
+  async migratePlanCycle(
+    groupId: string,
+    category: LawCategory,
+    startDate: Date,
+    onProgress?: (msg: string) => void
+  ): Promise<void> {
+    onProgress?.('กำลังค้นหากิจกรรมบนปฏิทิน...');
+
+    // Locate the plan's mid-term (+5) event among its own events.
+    const findUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events?privateExtendedProperty=g_${groupId}=true&singleEvents=true&maxResults=2500`;
+    const findResult = await this.authorizedFetch(findUrl);
+    const matchedEvents: GoogleCalendarEvent[] = findResult.items || [];
+
+    const startMs = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate()).getTime();
+    const legacyDate = new Date(startMs);
+    legacyDate.setDate(legacyDate.getDate() + LEGACY_CYCLE_OFFSET);
+    const legacyDateStr = formatDateISO(legacyDate);
+
+    const targetEvent = matchedEvents.find((ev) => {
+      let evDateStr = '';
+      if (ev.start?.dateTime) evDateStr = ev.start.dateTime.split('T')[0];
+      else if (ev.start?.date) evDateStr = ev.start.date;
+      return evDateStr === legacyDateStr;
+    });
+
+    if (!targetEvent) {
+      // Already migrated, or user deleted the +5 event manually — nothing to do.
+      onProgress?.('ไม่พบกิจกรรมรอบเก่าที่ต้องย้าย (อาจถูกย้ายไปแล้ว)');
+      return;
+    }
+
+    const privateProps = { ...(targetEvent.extendedProperties?.private || {}) } as Record<string, string>;
+    const sessionValue = privateProps[`sess_${groupId}`] || `${category}:`;
+    const normalizedSections = normalizeSections(sessionValue.includes(':') ? sessionValue.split(/:(.*)/s)[1] || '' : '');
+    const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+    const otherSessionKeys = Object.keys(privateProps).filter((k) => k.startsWith('sess_') && k !== `sess_${groupId}`);
+
+    if (otherSessionKeys.length === 0) {
+      // Sole occupant -> move the whole event to Day +7 with one PATCH.
+      const newMidDate = new Date(startMs);
+      newMidDate.setDate(newMidDate.getDate() + CURRENT_CYCLE_OFFSET);
+      const newDateStr = formatDateISO(newMidDate);
+
+      onProgress?.(`กำลังย้ายวันทบทวนรอบกลางจาก Day +${LEGACY_CYCLE_OFFSET} เป็น Day +${CURRENT_CYCLE_OFFSET} (${newDateStr})...`);
+
+      const startISO = `${newDateStr}T09:00:00`;
+      const endISO = `${newDateStr}T10:00:00`;
+      await this.authorizedFetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${targetEvent.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          start: { dateTime: startISO, timeZone: localTimeZone },
+          end: { dateTime: endISO, timeZone: localTimeZone },
+        }),
+      });
+      onProgress?.('ย้ายรอบการทบทวนสำเร็จเรียบร้อย!');
+      return;
+    }
+
+    // Shared with other sessions -> split:
+    // 1) Create a new +7 event for just this session.
+    const newMidDate = new Date(startMs);
+    newMidDate.setDate(newMidDate.getDate() + CURRENT_CYCLE_OFFSET);
+    const newDateStr = formatDateISO(newMidDate);
+
+    onProgress?.(`วันที่ +${LEGACY_CYCLE_OFFSET} ถูกใช้ร่วมกับแผนอื่น กำลังสร้างกิจกรรมใหม่วันที่ ${newDateStr} สำหรับแผนนี้...`);
+
+    const newProps: Record<string, string> = {
+      appId: 'law-srs-app-v1',
+      [`g_${groupId}`]: 'true',
+      [`sess_${groupId}`]: sessionValue,
+      [`sec_${category}`]: normalizedSections,
+    };
+    const { summary: newSummary, description: newDescription } = generateEventDetails(newProps);
+
+    await this.authorizedFetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events`, {
+      method: 'POST',
+      body: JSON.stringify({
+        summary: newSummary,
+        description: newDescription,
+        start: { dateTime: `${newDateStr}T09:00:00`, timeZone: localTimeZone },
+        end: { dateTime: `${newDateStr}T10:00:00`, timeZone: localTimeZone },
+        extendedProperties: { private: newProps },
+      }),
+    });
+
+    // 2) Strip this session from the shared +5 event (null out removed props).
+    onProgress?.('กำลังถอนแผนนี้ออกจากกิจกรรมวันที่ +5 ที่ใช้ร่วมกับแผนอื่น...');
+
+    delete privateProps[`g_${groupId}`];
+    delete privateProps[`sess_${groupId}`];
+
+    const cleanProps: Record<string, string | null> = {
+      appId: 'law-srs-app-v1',
+    };
+    for (const k of Object.keys(privateProps)) {
+      if (k.startsWith('g_') || k.startsWith('sess_')) {
+        cleanProps[k] = privateProps[k];
+      }
+    }
+
+    const { summary, description, sectionsByCat } = generateEventDetails(cleanProps as Record<string, string>);
+    for (const catKey of Object.keys(LAW_CATEGORIES)) {
+      const cat = catKey as LawCategory;
+      const items = sectionsByCat[cat];
+      if (items && items.length > 0) {
+        cleanProps[`sec_${cat}`] = items.join(', ');
+      }
+    }
+    const originalPrivate = targetEvent.extendedProperties?.private || {};
+    for (const k of Object.keys(originalPrivate)) {
+      if (!(k in cleanProps)) {
+        cleanProps[k] = null;
+      }
+    }
+
+    await this.authorizedFetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${targetEvent.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        summary,
+        description,
+        extendedProperties: { private: cleanProps },
+      }),
+    });
+
+    onProgress?.('ย้ายรอบการทบทวนสำเร็จเรียบร้อย!');
+  }
 }
 
 /**
@@ -406,6 +545,52 @@ export interface LawSessionDetail {
   sections: string;
   dates: string[]; // YYYY-MM-DD values
   createdDate: string; // The Day 0 date
+}
+
+/** Mid-term review cycle offsets supported by migration (old -> new). */
+export const LEGACY_CYCLE_OFFSET = 5;
+export const CURRENT_CYCLE_OFFSET = 7;
+
+/**
+ * Compute the day offset between an event date and a plan's Day-0 date.
+ */
+export function dayOffsetFromStart(dateStr: string, createdDateStr: string): number {
+  return Math.round(
+    (new Date(dateStr + 'T12:00:00').getTime() - new Date(createdDateStr + 'T12:00:00').getTime()) / 86400000
+  );
+}
+
+/**
+ * Detect legacy-cycle plans (mid-term review scheduled at Day +5 instead of
+ * Day +7) from already-fetched events — no extra API calls needed.
+ * Returns the groupIds of plans that still have their mid-term event on +5
+ * and nothing on +7. Tolerant of partially-deleted plans.
+ */
+export function findLegacyCycleGroupIds(
+  events: GoogleCalendarEvent[],
+  sessions: LawSessionDetail[]
+): string[] {
+  const result: string[] = [];
+
+  for (const sess of sessions) {
+    const hasLegacyMid = sess.dates.some((d) => {
+      const offset = dayOffsetFromStart(d, sess.createdDate);
+      // Guard: only treat dates near the mid-term window as the cycle slot,
+      // so unrelated manually-added events don't create false positives.
+      return offset >= LEGACY_CYCLE_OFFSET && offset < CURRENT_CYCLE_OFFSET;
+    });
+    if (!hasLegacyMid) continue;
+
+    const hasCurrentMid = sess.dates.some((d) => {
+      const offset = dayOffsetFromStart(d, sess.createdDate);
+      return offset >= CURRENT_CYCLE_OFFSET && offset < CURRENT_CYCLE_OFFSET + 3;
+    });
+    if (!hasCurrentMid) {
+      result.push(sess.groupId);
+    }
+  }
+
+  return result;
 }
 
 /**
@@ -562,5 +747,16 @@ export async function updateSRSSchedule(
 ): Promise<void> {
   const service = new GoogleCalendarService({ token });
   return service.updateSRSSchedule(groupId, category, newSections, onProgress);
+}
+
+export async function migratePlanCycle(
+  token: string,
+  groupId: string,
+  category: LawCategory,
+  startDate: Date,
+  onProgress?: (msg: string) => void
+): Promise<void> {
+  const service = new GoogleCalendarService({ token });
+  return service.migratePlanCycle(groupId, category, startDate, onProgress);
 }
 

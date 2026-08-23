@@ -231,7 +231,7 @@ describe('Calendar Utils', () => {
       expect(recordedSteps).toHaveLength(4);
       expect(recordedSteps[0]).toContain('Day +0');
       expect(recordedSteps[1]).toContain('Day +2');
-      expect(recordedSteps[2]).toContain('Day +5');
+      expect(recordedSteps[2]).toContain('Day +7');
       expect(recordedSteps[3]).toContain('Day +30');
     });
 

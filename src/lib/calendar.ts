@@ -69,7 +69,7 @@ export class GoogleCalendarService {
   }
 
   /**
-   * Create or upgrade schedules for Day 0, Day +2, Day +5, Day +30
+   * Create or upgrade schedules for Day 0, Day +2, Day +7, Day +30
    */
   async syncSRSSchedule(
     category: LawCategory,
@@ -78,7 +78,7 @@ export class GoogleCalendarService {
     onProgress?: (step: string) => void
   ): Promise<string> {
     const groupId = generateUUID();
-    const offsets = [0, 2, 5, 30];
+    const offsets = [0, 2, 7, 30];
     const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
     const normalizedSections = normalizeSections(sections);
 

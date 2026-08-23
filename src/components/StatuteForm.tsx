@@ -59,7 +59,7 @@ export default function StatuteForm({ onSync, isSyncing, syncProgress }: Statute
     const offsets = [
       { days: 0, label: 'ทบทวนทันทีรอบแรก', id: 'Day 0 (ทันที)' },
       { days: 2, label: 'ทบทวนระยะสั้น (กันลืม)', id: 'Day +2 (2 วัน)' },
-      { days: 5, label: 'ทบทวนเพื่อกระตุ้นสมอง', id: 'Day +5 (5 วัน)' },
+      { days: 7, label: 'ทบทวนเพื่อกระตุ้นสมอง', id: 'Day +7 (7 วัน)' },
       { days: 30, label: 'ทบทวนยาวให้ฝังแน่น', id: 'Day +30 (30 วัน)' },
     ];
 

@@ -309,9 +309,14 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
                       วันทบทวนความรู้ 4 ระยะ (เว้นช่วงความจำ)
                     </div>
                     <div className="grid grid-cols-2 gap-2 mt-1">
-                      {sess.dates.map((d, index) => {
-                        const offsets = [0, 2, 5, 30];
-                        const offsetLabel = `รอบ Day +${offsets[index] ?? 'x'}`;
+                      {sess.dates.map((d) => {
+                        // Derive the real day offset from this plan's Day-0 date,
+                        // so legacy plans (e.g. old 5-day cycle) label correctly too.
+                        const dayDiff = Math.round(
+                          (new Date(d + 'T12:00:00').getTime() -
+                            new Date(sess.createdDate + 'T12:00:00').getTime()) / 86400000
+                        );
+                        const offsetLabel = `รอบ Day ${dayDiff >= 0 ? '+' : ''}${dayDiff}`;
                         const formattedDate = new Date(d + 'T12:00:00').toLocaleDateString('th-TH', {
                           month: 'short',
                           day: 'numeric',

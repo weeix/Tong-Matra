@@ -270,15 +270,21 @@ export class GoogleCalendarService {
   }
 
   /**
-   * Update the statute-section list for an existing study plan across all of
-   * its Google Calendar revision-day events.
+   * Update sections across a study plan's Calendar events. When a new Day-0
+   * date is supplied, resync its four milestones without moving other plans.
    */
   async updateSRSSchedule(
     groupId: string,
     category: LawCategory,
     newSections: string,
-    onProgress?: (msg: string) => void
+    onProgress?: (msg: string) => void,
+    newStartDate?: Date
   ): Promise<void> {
+    if (newStartDate) {
+      if (!Number.isFinite(newStartDate.getTime())) throw new Error('วันที่เริ่มต้นไม่ถูกต้อง');
+      await this.reschedulePlan(groupId, category, normalizeSections(newSections), newStartDate, onProgress);
+      return;
+    }
     onProgress?.('กำลังค้นหากิจกรรมบนปฏิทิน...');
 
     const normalizedSections = normalizeSections(newSections);
@@ -352,6 +358,103 @@ export class GoogleCalendarService {
     }
 
     onProgress?.('ปรับปรุงแผนการเรียนรู้สำเร็จเรียบร้อย!');
+  }
+
+  /** Read every page, including older milestones outside the dashboard window. */
+  private async listEvents(url: string): Promise<GoogleCalendarEvent[]> {
+    const events: GoogleCalendarEvent[] = [];
+    const query = new URL(url);
+    query.searchParams.set('maxResults', '2500');
+    let pageToken: string | undefined;
+    do {
+      if (pageToken) query.searchParams.set('pageToken', pageToken);
+      const result = await this.authorizedFetch(query.toString());
+      events.push(...(result.items || []));
+      pageToken = result.nextPageToken;
+    } while (pageToken);
+    return events;
+  }
+
+  private async reschedulePlan(
+    groupId: string,
+    category: LawCategory,
+    sections: string,
+    startDate: Date,
+    onProgress?: (msg: string) => void
+  ): Promise<void> {
+    const baseUrl = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
+    const groupUrl = `${baseUrl}?privateExtendedProperty=g_${groupId}=true&singleEvents=true`;
+    onProgress?.('กำลังค้นหากิจกรรมบนปฏิทิน...');
+    const original = await this.listEvents(groupUrl);
+    if (!original.length) throw new Error('ไม่พบแผนนี้บนปฏิทิน กรุณารีเฟรชแล้วลองอีกครั้ง');
+    const targetDates = [0, 2, CURRENT_CYCLE_OFFSET, 30].map(offset => {
+      const date = new Date(startDate);
+      date.setDate(date.getDate() + offset);
+      return formatDateISO(date);
+    });
+    const retained = new Set<string>();
+    const dateOf = (event: GoogleCalendarEvent) => event.start.dateTime?.slice(0, 10) || event.start.date || '';
+    const sessionKey = `sess_${groupId}`;
+    const isShared = (event: GoogleCalendarEvent) => Object.keys(event.extendedProperties?.private || {})
+      .some(key => key.startsWith('sess_') && key !== sessionKey);
+
+    // Save all destinations before removing the plan from shared source events.
+    // Reuse sole-occupant events where possible to preserve IDs and manual settings.
+    for (const date of targetDates) {
+      onProgress?.(`กำลังบันทึกวันทบทวน ${date}...`);
+      const day = Date.parse(date + 'T00:00:00Z');
+      const query = new URL(baseUrl);
+      query.searchParams.set('privateExtendedProperty', 'appId=law-srs-app-v1');
+      query.searchParams.set('singleEvents', 'true');
+      // Wide UTC window covers all timezones; match the calendar date explicitly.
+      query.searchParams.set('timeMin', new Date(day - 86400000).toISOString());
+      query.searchParams.set('timeMax', new Date(day + 2 * 86400000).toISOString());
+      const candidates = (await this.listEvents(query.toString())).filter(e => dateOf(e) === date);
+      const destination = candidates.find(e => e.extendedProperties?.private?.[sessionKey]) || candidates[0];
+      const reusable = destination || original.find(e => !retained.has(e.id) && !isShared(e) && !targetDates.includes(dateOf(e)));
+      const props = { ...(reusable?.extendedProperties?.private || {}), appId: 'law-srs-app-v1',
+        [`g_${groupId}`]: 'true', [sessionKey]: `${category}:${sections}` } as Record<string, string>;
+      const body = buildSessionEventBody(props, reusable?.extendedProperties?.private);
+      if (!destination) {
+        const template = reusable || original[0];
+        Object.assign(body, shiftEventDates(template, date));
+      }
+      if (reusable) {
+        await this.authorizedFetch(`${baseUrl}/${encodeURIComponent(reusable.id)}`, {
+          method: 'PATCH', body: JSON.stringify(body),
+        });
+        retained.add(reusable.id);
+      } else {
+        const created = await this.authorizedFetch<GoogleCalendarEvent>(baseUrl, {
+          method: 'POST', body: JSON.stringify(body),
+        });
+        if (!created.id) throw new Error('ปฏิทินไม่ได้ส่งรหัสกิจกรรมที่สร้างกลับมา');
+        retained.add(created.id);
+      }
+    }
+
+    for (const event of original) {
+      if (retained.has(event.id)) continue;
+      onProgress?.(`กำลังถอนวันทบทวนเดิม ${dateOf(event)}...`);
+      const url = `${baseUrl}/${encodeURIComponent(event.id)}`;
+      if (!isShared(event)) {
+        await this.authorizedFetch(url, { method: 'DELETE' });
+      } else {
+        const props = { ...event.extendedProperties?.private } as Record<string, string>;
+        delete props[`g_${groupId}`];
+        delete props[sessionKey];
+        await this.authorizedFetch(url, { method: 'PATCH', body: JSON.stringify(buildSessionEventBody(props, event.extendedProperties?.private)) });
+      }
+    }
+
+    // Read back the exact plan before reporting success. Also catches stale copies.
+    const saved = await this.listEvents(groupUrl);
+    const dates = saved.map(dateOf).sort();
+    if (JSON.stringify(dates) !== JSON.stringify([...targetDates].sort()) ||
+        saved.some(e => e.extendedProperties?.private?.[sessionKey] !== `${category}:${sections}`)) {
+      throw new Error('ตรวจสอบการซิงก์ปฏิทินไม่สำเร็จ กรุณาลองบันทึกอีกครั้ง');
+    }
+    onProgress?.('ปรับปรุงวันที่และแผนการเรียนรู้สำเร็จเรียบร้อย!');
   }
 
   /**
@@ -509,9 +612,34 @@ export function generateUUID(): string {
   });
 }
 
-/**
- * Standardize YYYY-MM-DD local dates
- */
+/** Rebuild section aggregates while preserving unrelated private metadata. */
+function buildSessionEventBody(props: Record<string, string>, original: Record<string, string | undefined> = {}) {
+  const clean = Object.fromEntries(Object.entries(props).filter(([key]) => !key.startsWith('sec_')));
+  const { summary, description, sectionsByCat } = generateEventDetails(clean);
+  for (const [cat, items] of Object.entries(sectionsByCat)) clean[`sec_${cat}`] = items.join(', ');
+  const patchProps: Record<string, string | null> = { ...clean };
+  for (const key of Object.keys(original)) if (!(key in clean)) patchProps[key] = null;
+  return { summary, description, extendedProperties: { private: patchProps } };
+}
+
+/** Shift wall-clock dates without converting through UTC or losing all-day duration. */
+function shiftEventDates(event: GoogleCalendarEvent, targetDate: string) {
+  const oldDate = event.start.dateTime?.slice(0, 10) || event.start.date;
+  if (!oldDate) throw new Error('กิจกรรมเดิมไม่มีวันที่เริ่มต้น');
+  const delta = Date.parse(targetDate + 'T00:00:00Z') - Date.parse(oldDate + 'T00:00:00Z');
+  const shift = (point: GoogleCalendarEvent['start']) => {
+    const value = point.dateTime || point.date;
+    if (!value) throw new Error('กิจกรรมเดิมไม่มีวันที่สิ้นสุด');
+    const date = new Date(Date.parse(value.slice(0, 10) + 'T00:00:00Z') + delta).toISOString().slice(0, 10);
+    // For named zones let Calendar resolve the offset on the NEW date (DST).
+    // Without a named zone retain the event's explicit fixed offset.
+    const time = point.timeZone ? value.slice(10).replace(/(Z|[+-]\d{2}:\d{2})$/, '') : value.slice(10);
+    return point.dateTime ? { ...point, dateTime: date + time } : { ...point, date };
+  };
+  return { start: shift(event.start), end: shift(event.end) };
+}
+
+/** Standardize YYYY-MM-DD local dates. */
 export function formatDateISO(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -743,10 +871,11 @@ export async function updateSRSSchedule(
   groupId: string,
   category: LawCategory,
   newSections: string,
-  onProgress?: (msg: string) => void
+  onProgress?: (msg: string) => void,
+  newStartDate?: Date
 ): Promise<void> {
   const service = new GoogleCalendarService({ token });
-  return service.updateSRSSchedule(groupId, category, newSections, onProgress);
+  return service.updateSRSSchedule(groupId, category, newSections, onProgress, newStartDate);
 }
 
 export async function migratePlanCycle(

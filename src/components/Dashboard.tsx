@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { GoogleCalendarEvent, LawCategory, LAW_CATEGORIES, getCategoryConfig } from '../types';
-import { LawSessionDetail, deleteSRSSchedule, updateSRSSchedule, migratePlanCycle, findLegacyCycleGroupIds } from '../lib/calendar';
+import { LawSessionDetail, deleteSRSSchedule, updateSRSSchedule, migratePlanCycle, findLegacyCycleGroupIds, formatDateISO } from '../lib/calendar';
 import { reportError } from '../lib/errorLog';
 import { Calendar, Trash2, ShieldAlert, ListFilter, RefreshCw, BookOpen, Clock, Grid2X2, Pencil, CalendarClock } from 'lucide-react';
 
@@ -30,6 +30,7 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
   // Edit plan state
   const [sessionToEdit, setSessionToEdit] = useState<LawSessionDetail | null>(null);
   const [editSections, setEditSections] = useState<string>('');
+  const [editStartDate, setEditStartDate] = useState<string>('');
   const [editError, setEditError] = useState<string>('');
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [editProgress, setEditProgress] = useState<string>('');
@@ -119,10 +120,11 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
     }
   };
 
-  // Open the edit modal pre-filled with the current sections
+  // Open the edit modal pre-filled with the current sections and Day-0 date
   const openEditModal = (sess: LawSessionDetail) => {
     setSessionToEdit(sess);
     setEditSections(sess.sections);
+    setEditStartDate(sess.createdDate);
     setEditError('');
     setEditProgress('');
   };
@@ -143,22 +145,30 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
       return;
     }
 
+    const startDate = new Date(editStartDate + 'T12:00:00');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(editStartDate) || !Number.isFinite(startDate.getTime()) || formatDateISO(startDate) !== editStartDate) {
+      setEditError('กรุณาระบุวันที่เริ่มต้นจดจำให้ถูกต้อง');
+      return;
+    }
+
+    setEditError('');
     setIsEditing(true);
     setEditProgress('กำลังปรับปรุงข้อมูลบนปฏิทิน...');
 
     try {
       await updateSRSSchedule(token, sessionToEdit.groupId, sessionToEdit.category, trimmed, (msg) => {
         setEditProgress(msg);
-      });
+      }, editStartDate !== sessionToEdit.createdDate ? startDate : undefined);
 
       // Cleanup
       setSessionToEdit(null);
       setEditSections('');
+      setEditStartDate('');
       await onRefresh();
     } catch (err) {
       console.error('Schedule update failed:', err);
       reportError(err, 'handleEditConfirm');
-      alert(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการแก้ไข');
+      setEditError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการแก้ไข');
     } finally {
       setIsEditing(false);
       setEditProgress('');
@@ -597,14 +607,14 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
       {/* STUDY PLAN EDIT DIALOG */}
       {sessionToEdit && (
         <div id="edit-plan-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
-          <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full max-h-[90dvh] overflow-y-auto p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <div className="flex items-center space-x-3 text-indigo-600 mb-4 border-b border-slate-100 pb-3">
               <div className="p-2.5 bg-indigo-50 border border-indigo-100 rounded-full">
                 <Pencil size={22} className="text-indigo-600" />
               </div>
               <div>
-                <h3 className="font-sans text-base font-black text-slate-900">แก้ไขรายการมาตราในแผน</h3>
-                <p className="text-[11px] text-slate-400">ระบบจะปรับปรุงรายการมาตราในกิจกรรมทบทวนทั้ง 4 วันของแผนนี้โดยอัตโนมัติ</p>
+                <h3 className="font-sans text-base font-black text-slate-900">แก้ไขแผนท่องจำ</h3>
+                <p className="text-[11px] text-slate-400">แก้ไขมาตราและวันที่เริ่มต้น พร้อมซิงก์กิจกรรมทบทวนบนปฏิทิน</p>
               </div>
             </div>
 
@@ -633,6 +643,24 @@ export default function Dashboard({ events, sessions, onRefresh, isLoading, toke
                 />
                 <p className="text-[10px] text-slate-400 mt-1">
                   ระบุเป็นรายมาตรา หรือเป็นช่วงด้วยยัติภังค์ (เช่น <code className="font-mono text-slate-600">420-430, 435</code>)
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="edit-start-date-input" className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
+                  วันที่เริ่มต้นจดจำ (Day 0)
+                </label>
+                <input
+                  id="edit-start-date-input"
+                  type="date"
+                  required
+                  value={editStartDate}
+                  onChange={(e) => setEditStartDate(e.target.value)}
+                  disabled={isEditing}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  หากเปลี่ยนวันที่ ระบบจะจัดวันทบทวนใหม่เป็น Day 0, +2, +7, +30 โดยไม่เปลี่ยนวันของแผนอื่น
                 </p>
               </div>
 
